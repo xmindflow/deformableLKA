@@ -5,3 +5,7 @@ DATASET_Acdc.zip
 3D/output*/
 model_zoo/
 __pycache__/
+
+2D/pretrained_models/
+2D/pretrained_pth/*
+2D/visualization/

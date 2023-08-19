@@ -1,0 +1,7 @@
+DATASET_Acdc/
+3D/DATASET/
+DATASET_Tumor.zip
+DATASET_Acdc.zip
+3D/output*/
+model_zoo/
+__pycache__/

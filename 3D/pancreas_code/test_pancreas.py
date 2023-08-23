@@ -4,7 +4,7 @@ import torch
 from networks.vnet import VNet
 from networks.ResNet34 import Resnet34
 from networks.unetr import UNETR
-from networks.d_lka_former.unetr_pp_synapse import UNETR_PP
+from networks.d_lka_former.d_lka_net_synapse import D_LKA_Net
 from networks.d_lka_former.transformerblock import TransformerBlock_3D_single_deform_LKA, TransformerBlock
 
 from test_util import test_all_case
@@ -32,17 +32,8 @@ image_list = [args.root_path +item.replace('\n', '') for item in image_list] #+"
 def create_model(name='dlka_former'):
     # Network definition        
     if name == 'dlka_former':
-            # net = UNETR_PP(in_channels=1, 
-            #                out_channels=num_classes, 
-            #                img_size=[96, 96, 96],
-            #                patch_size=(2,2,2),
-            #                input_size=[48*48*48, 24*24*24,12*12*12,6*6*6],
-            #                trans_block=TransformerBlock_3D_single_deform_LKA,
-            #                do_ds=False)
-            # net = UNETR(in_channels=1, 
-            #                out_channels=num_classes, 
-            #                img_size=[96, 96, 96],)
-            net = UNETR_PP(in_channels=1, 
+            
+            net = D_LKA_Net(in_channels=1, 
                            out_channels=num_classes, 
                            img_size=[96, 96, 96],
                            patch_size=(2,2,2),
@@ -68,7 +59,7 @@ def test_calculate_metric(epoch_num):
     model_flops = flops.total()
     print(f"Total trainable parameters: {round(n_parameters * 1e-6, 2)} M")
     print(f"MAdds: {round(model_flops * 1e-9, 2)} G")
-    #sys.exit()
+
     dlka_former.eval()
 
 

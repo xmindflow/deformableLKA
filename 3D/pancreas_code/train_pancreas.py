@@ -111,7 +111,7 @@ if __name__ == "__main__":
                            img_size=[96, 96, 96],
                            patch_size=(2,2,2),
                            input_size=[48*48*48, 24*24*24,12*12*12,6*6*6],
-                           trans_block=TransformerBlock,
+                           trans_block=TransformerBlock_3D_single_deform_LKA,
                            do_ds=False)
             model = net.cuda()
         return model

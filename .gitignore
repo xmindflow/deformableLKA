@@ -6,6 +6,7 @@ DATASET_Acdc.zip
 3D/output*/
 3D/pancreas_code/dataset_pancreas/
 !3D/pancreas_code/dataset_pancreas/Pancreas/
+3D/pancreas_code/model/
 
 #2D
 2D/pretrained_models/

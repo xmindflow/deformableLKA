@@ -1,7 +1,6 @@
 #!/bin/sh
 
 DATASET_PATH=/home/leon/repos/deformableLKA/3D/DATASET
-#CHECKPOINT_PATH=unetr_pp/evaluation/unetr_pp_synapse_checkpoint
 CHECKPOINT_PATH=/home/leon/repos/deformableLKA/3D/output_synapse_test_continuing/
 export PYTHONPATH=./
 export RESULTS_FOLDER="$CHECKPOINT_PATH"

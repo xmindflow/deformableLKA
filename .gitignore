@@ -1,11 +1,11 @@
+#3D
 DATASET_Acdc/
 3D/DATASET/
 DATASET_Tumor.zip
 DATASET_Acdc.zip
 3D/output*/
-model_zoo/
-__pycache__/
-
+3D/pancreas_code/dataset_pancreas/
+!3D/pancreas_code/dataset_pancreas/Pancreas/
 
 #2D
 2D/pretrained_models/
@@ -14,3 +14,7 @@ __pycache__/
 2D/skin_code/ISIC2017
 2D/skin_code/ISIC2018
 2D/skin_code/PH2
+
+#general
+model_zoo/
+__pycache__/

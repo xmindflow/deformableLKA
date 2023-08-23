@@ -619,11 +619,11 @@ from model.merit_lib.networks import MaxViT4Out_Small
 
 
 class MaxViT_deformableLKAFormer(nn.Module):
-    def __init__(self, num_classes=9, head_count=1, token_mlp_mode="mix_skip", img_size=224):
+    def __init__(self, num_classes=9, head_count=1, token_mlp_mode="mix_skip", img_size=224, pretrain=False):
         super().__init__()
 
         # Encoder
-        self.backbone = MaxViT4Out_Small(n_class=num_classes, img_size=img_size)
+        self.backbone = MaxViT4Out_Small(n_class=num_classes, img_size=img_size, pretrain=pretrain)
 
         # Decoder
         if img_size == 224:

@@ -54,8 +54,6 @@ args = parser.parse_args()
 
 ## Loader
 ## Hyper parameters
-config         = yaml.load(open('./config_skin.yml'), Loader=yaml.FullLoader)
-number_classes = int(config['number_classes'])
 input_channels = 3
 best_val_loss  = np.inf
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -102,9 +100,10 @@ if not os.path.exists(snapshot_path):
     
 Net = MaxViT_deformableLKAFormer(img_size=args.img_size, num_classes=1).to(device)
 
+# use network pre-trained on ISIC datasets
 if args.is_pretrain:
     print("Load pretrained skin model...")
-    net_ckpt = torch.load('/work/scratch/niggemeier/projects/transnorm/model_results2018/MaxViT_isic2018224/model_pretrain_epo100_bs16_lr0.01_imgsize224_s200/best_model.pth')
+    net_ckpt = torch.load('/pretrain_path/best_model.pth')
     Net.load_state_dict(net_ckpt['model_weights'])
     print("..Done loading checkpoint.")
 
@@ -159,4 +158,4 @@ for ep in range(int(args.max_epochs)):
 
     scheduler.step(mean_val_loss)
     
-print('Trainng phase finished')    
+print('Training phase finished')    

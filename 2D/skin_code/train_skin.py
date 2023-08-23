@@ -47,14 +47,14 @@ parser.add_argument('--vit_name', type=str,
                     default='R50-ViT-B_16', help='select one vit model')
 parser.add_argument('--vit_patches_size', type=int,
                     default=16, help='vit_patches_size, default is 16')
+parser.add_argument('--is_pretrain', type=bool,
+                    default=False, help='Use pretrained backbone')
 args = parser.parse_args()
 #args = parser.parse_args(args=[])
 
 
 ## Loader
 ## Hyper parameters
-config         = yaml.load(open('./config_skin.yml'), Loader=yaml.FullLoader)
-number_classes = int(config['number_classes'])
 input_channels = 3
 best_val_loss  = np.inf
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -82,7 +82,6 @@ dataset_config = {
 args.num_classes = 1
 args.root_path = ''
 args.list_dir = ''
-args.is_pretrain = True
 args.exp = 'MaxViT_' + dataset_name + str(args.img_size)
 snapshot_path = "./model_results2018/{}/{}".format(args.exp, 'model')
 snapshot_path = snapshot_path + '_pretrain' if args.is_pretrain else snapshot_path
@@ -100,7 +99,7 @@ print("Batch size: {}".format(args.batch_size))
 if not os.path.exists(snapshot_path):
     os.makedirs(snapshot_path)
     
-Net = MaxViT_deformableLKAFormer(img_size=args.img_size, num_classes=1).to(device)
+Net = MaxViT_deformableLKAFormer(img_size=args.img_size, num_classes=1, pretrain=args.is_pretrain).to(device)
 
 optimizer = optim.SGD(Net.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor = 0.5, patience = 10)
@@ -125,7 +124,7 @@ for ep in range(int(args.max_epochs)):
         loss.backward()
         epoch_loss += loss.item()
         optimizer.step()  
-        if itter%int(float(config['progress_p']) * len(train_loader))==0:
+        if itter%20==0:
             print(f' Epoch>> {ep+1} and itteration {itter+1} Loss>> {((epoch_loss/(itter+1)))}')
     ## Validation phase
     with torch.no_grad():
@@ -151,4 +150,4 @@ for ep in range(int(args.max_epochs)):
 
     scheduler.step(mean_val_loss)
     
-print('Trainng phase finished')    
+print('Training phase finished')    

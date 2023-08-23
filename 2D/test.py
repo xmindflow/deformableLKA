@@ -12,15 +12,15 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from datasets.dataset_synapse import Synapse_dataset
-from networks.DAEFormer import DAEFormer
-from trainer import trainer_synapse
+from networks.MaxViT_deform_LKA import  MaxViT_deformableLKAFormer
+from trainer_MaxViT_deform_LKA import trainer_synapse
 from utils import test_single_volume
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--volume_path",
     type=str,
-    default="/images/PublicDataset/Transunet_synaps/project_TransUNet/data/Synapse/",
+    default="/home/leon/repos/LeonsStuff/data/Synapse/",
     help="root dir for validation volume data",
 )  # for acdc volume_path=root_dir
 parser.add_argument("--dataset", type=str, default="Synapse", help="experiment_name")
@@ -132,7 +132,7 @@ if __name__ == "__main__":
     args.z_spacing = dataset_config[dataset_name]["z_spacing"]
     args.is_pretrain = True
 
-    net = DAEFormer(num_classes=args.num_classes).cuda(0)
+    net = MaxViT_deformableLKAFormer(num_classes=args.num_classes).cuda(0)
 
     snapshot = os.path.join(args.output_dir, "best_model.pth")
     if not os.path.exists(snapshot):

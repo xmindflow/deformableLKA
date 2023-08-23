@@ -6,6 +6,11 @@ DATASET_Acdc.zip
 model_zoo/
 __pycache__/
 
+
+#2D
 2D/pretrained_models/
 2D/pretrained_pth/*
 2D/visualization/
+2D/skin_code/ISIC2017
+2D/skin_code/ISIC2018
+2D/skin_code/PH2

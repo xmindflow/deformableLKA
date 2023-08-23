@@ -1,0 +1,6 @@
+[18:44:26.858] Namespace(base_lr=0.01, batch_size=8, consistency=0.1, consistency_rampup=40.0, consistency_type='mse', deterministic=1, ema_decay=0.999, exp='pancreas1', gpu='0', labeled_bs=1, max_iterations=6000, root_path='./dataset_pancreas', seed=1337)
+[18:44:33.429] 62 itertations per epoch
+[18:47:11.396] Namespace(base_lr=0.01, batch_size=8, consistency=0.1, consistency_rampup=40.0, consistency_type='mse', deterministic=1, ema_decay=0.999, exp='pancreas1', gpu='0', labeled_bs=1, max_iterations=6000, root_path='./dataset_pancreas', seed=1337)
+[18:47:13.889] 62 itertations per epoch
+[18:49:52.002] Namespace(base_lr=0.01, batch_size=8, consistency=0.1, consistency_rampup=40.0, consistency_type='mse', deterministic=1, ema_decay=0.999, exp='pancreas1', gpu='0', labeled_bs=1, max_iterations=6000, root_path='./dataset_pancreas', seed=1337)
+[18:49:54.465] 62 itertations per epoch

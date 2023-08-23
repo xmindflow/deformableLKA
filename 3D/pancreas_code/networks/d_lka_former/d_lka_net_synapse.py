@@ -3,13 +3,12 @@ from typing import Tuple, Union
 
 from networks.neural_network import SegmentationNetwork
 from networks.dynunet_block import UnetOutBlock, UnetResBlock
-from networks.d_lka_former.model_components import UnetrPPEncoder, UnetrUpBlock
+from networks.d_lka_former.model_components import D_LKA_NetEncoder, D_LKA_NetUpBlock
 from networks.d_lka_former.transformerblock import TransformerBlock, TransformerBlock_LKA_Channel, TransformerBlock_SE, TransformerBlock_3D_LKA, TransformerBlock_Deform_LKA_Channel, TransformerBlock_Deform_LKA_Channel_sequential, TransformerBlock_3D_LKA_3D_conv, TransformerBlock_LKA_Channel_norm, TransformerBlock_LKA_Spatial, TransformerBlock_Deform_LKA_Spatial_sequential, TransformerBlock_Deform_LKA_Spatial, TransformerBlock_3D_single_deform_LKA
 
-class UNETR_PP(SegmentationNetwork):
+class D_LKA_Net(SegmentationNetwork):
     """
-    UNETR++ based on: "Shaker et al.,
-    UNETR++: Delving into Efficient and Accurate 3D Medical Image Segmentation"
+    3D D-LKA Net for pancreas segmentation
     """
 
     def __init__(
@@ -79,7 +78,7 @@ class UNETR_PP(SegmentationNetwork):
 
         print("Using transformerblock: {}".format(trans_block))
 
-        self.unetr_pp_encoder = UnetrPPEncoder(dims=dims, 
+        self.unetr_pp_encoder = D_LKA_NetEncoder(dims=dims, 
                                                depths=depths, 
                                                num_heads=num_heads,
                                                input_size=input_size,
@@ -93,7 +92,7 @@ class UNETR_PP(SegmentationNetwork):
             stride=1,
             norm_name=norm_name,
         )
-        self.decoder5 = UnetrUpBlock(
+        self.decoder5 = D_LKA_NetUpBlock(
             spatial_dims=3,
             in_channels=feature_size * 16,
             out_channels=feature_size * 8,
@@ -104,7 +103,7 @@ class UNETR_PP(SegmentationNetwork):
             trans_block=trans_block,
             use_skip=skip_connections[0]
         )
-        self.decoder4 = UnetrUpBlock(
+        self.decoder4 = D_LKA_NetUpBlock(
             spatial_dims=3,
             in_channels=feature_size * 8,
             out_channels=feature_size * 4,
@@ -115,7 +114,7 @@ class UNETR_PP(SegmentationNetwork):
             trans_block=trans_block,
             use_skip=skip_connections[1]
         )
-        self.decoder3 = UnetrUpBlock(
+        self.decoder3 = D_LKA_NetUpBlock(
             spatial_dims=3,
             in_channels=feature_size * 4,
             out_channels=feature_size * 2,
@@ -126,7 +125,7 @@ class UNETR_PP(SegmentationNetwork):
             trans_block=trans_block,
             use_skip=skip_connections[2]
         )
-        self.decoder2 = UnetrUpBlock(
+        self.decoder2 = D_LKA_NetUpBlock(
             spatial_dims=3,
             in_channels=feature_size * 2,
             out_channels=feature_size,

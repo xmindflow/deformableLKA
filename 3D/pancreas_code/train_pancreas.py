@@ -17,13 +17,13 @@ from torch.utils.data import DataLoader
 from networks.vnet import VNet
 from networks.ResNet34 import Resnet34
 from networks.unetr import UNETR
-from networks.d_lka_former.unetr_pp_synapse import UNETR_PP
+from networks.d_lka_former.d_lka_net_synapse import D_LKA_Net
 from networks.d_lka_former.transformerblock import TransformerBlock_3D_single_deform_LKA, TransformerBlock
 from utils import ramps, losses
-from dataloaders.la_heart import LAHeart, RandomCrop, ToTensor, TwoStreamBatchSampler
+from dataloaders.la_heart import LAHeart, RandomCrop, ToTensor
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--root_path', type=str, default='/work/scratch/niggemeier/projects/MCF/dataset_pancreas', help='Name of Experiment')               # todo change dataset path
+parser.add_argument('--root_path', type=str, default='./dataset_pancreas', help='Name of Experiment')               # todo change dataset path
 parser.add_argument('--exp', type=str,  default="pancreas1", help='model_name')                               # todo model name
 parser.add_argument('--max_iterations', type=int,  default=6000, help='maximum epoch number to train') # 6000
 parser.add_argument('--batch_size', type=int, default=8, help='batch_size per gpu')
@@ -58,7 +58,7 @@ if args.deterministic:
     torch.cuda.manual_seed(args.seed)
 
 num_classes = 2
-patch_size =(96,96,96) #(64, 128, 128)# (112, 112, 80) # 96x96x96 for Pancreas, (112,112,80) for heart
+patch_size =(96,96,96)  # 96x96x96 for Pancreas
 T = 0.1
 Good_student = 0 # 0: vnet 1:resnet
 
@@ -106,17 +106,7 @@ if __name__ == "__main__":
     def create_model(name ='dlka_former'):
         # Network definition
         if name == 'dlka_former':
-            # net = UNETR_PP(in_channels=1, 
-            #                out_channels=num_classes, 
-            #                img_size=[96, 96, 96],
-            #                patch_size=(2,2,2),
-            #                input_size=[48*48*48, 24*24*24,12*12*12,6*6*6],
-            #                trans_block=TransformerBlock_3D_single_deform_LKA,
-            #                do_ds=False)
-            # net = UNETR(in_channels=1, 
-            #                out_channels=num_classes, 
-            #                img_size=[96, 96, 96],)
-            net = UNETR_PP(in_channels=1, 
+            net = D_LKA_Net(in_channels=1, 
                            out_channels=num_classes, 
                            img_size=[96, 96, 96],
                            patch_size=(2,2,2),
@@ -126,45 +116,22 @@ if __name__ == "__main__":
             model = net.cuda()
         return model
 
-    #model_vnet = create_model(name='vnet')
-    #model_resnet = create_model(name='resnet34')
     model_d_lka_former = create_model(name='dlka_former')
 
+    db_train = LAHeart(base_dir=train_data_path, split='train', train_flod='train0.list', common_transform=transforms.Compose([RandomCrop(patch_size),]),
+                        sp_transform=transforms.Compose([ToTensor(),]))
 
-    db_train = LAHeart(base_dir=train_data_path,
-                               split='train',
-                               train_flod='train0.list',                   # todo change training flod
-                               common_transform=transforms.Compose([
-                                   RandomCrop(patch_size),
-                               ]),
-                               sp_transform=transforms.Compose([
-                                   ToTensor(),
-                               ]))
 
-    labeled_idxs = list(range(16))           # todo set labeled num
-    unlabeled_idxs = list(range(16, 80))     # todo set labeled num all_sample_num
-
-    batch_sampler = TwoStreamBatchSampler(labeled_idxs, unlabeled_idxs, batch_size, batch_size - labeled_bs)
     trainloader = DataLoader(db_train, batch_sampler=None, num_workers=4, pin_memory=True,
                              worker_init_fn=worker_init_fn)
-    #vnet_optimizer = optim.SGD(model_vnet.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
-    #resnet_optimizer = optim.SGD(model_resnet.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
     d_lka_former_optimizer = optim.SGD(model_d_lka_former.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
-
-    if args.consistency_type == 'mse':
-        consistency_criterion = losses.softmax_mse_loss
-    elif args.consistency_type == 'kl':
-        consistency_criterion = losses.softmax_kl_loss
-    else:
-        assert False, args.consistency_type
 
     writer = SummaryWriter(snapshot_path+'/log')
     logging.info("{} itertations per epoch".format(len(trainloader)))
     iter_num = 0
     max_epoch = max_iterations//len(trainloader)+1
     lr_ = base_lr
-    #model_vnet.train()
-    #model_resnet.train()
+
     model_d_lka_former.train()
 
     for epoch_num in tqdm(range(max_epoch), ncols=70):
@@ -174,14 +141,10 @@ if __name__ == "__main__":
             print('epoch:{}, i_batch:{}'.format(epoch_num,i_batch))
             volume_batch1, volume_label1 = sampled_batch[0]['image'], sampled_batch[0]['label']
             volume_batch2, volume_label2 = sampled_batch[1]['image'], sampled_batch[1]['label']
-
-            #print("Some infor about the data:")
-            #print("Data shape: {}".format(volume_batch1.size()))
-            #print("Label shape: {}".format(volume_label1.size()))
+            # Transfer to GPU
             lka_input,lka_label = volume_batch1.cuda(), volume_label1.cuda()
 
-            #v_outputs = model_vnet(v_input)
-            #r_outputs = model_resnet(r_input)
+            # Network forward
             lka_outputs = model_d_lka_former(lka_input)
 
             ## calculate the supervised loss           
@@ -190,10 +153,11 @@ if __name__ == "__main__":
             lka_loss_seg_dice = losses.dice_loss(lka_outputs_soft[:labeled_bs, 1, :, :, :], lka_label[:labeled_bs] == 1)
             
             loss_total = lka_loss_seg + lka_loss_seg_dice
-
+            # Network backward
             d_lka_former_optimizer.zero_grad()
             loss_total.backward()
             d_lka_former_optimizer.step()
+
             writer.add_scalar('lr', lr_, iter_num)
             writer.add_scalar('loss/total_loss', loss_total, iter_num)
             writer.add_scalar('loss/lka_loss_seg', lka_loss_seg, iter_num)
@@ -201,7 +165,7 @@ if __name__ == "__main__":
 
             if iter_num % 50 == 0 and iter_num !=0:
                 logging.info(
-                    'iteration ： %d Total loss : %f CE loss : %f Dice loss : %f'  %
+                    'iteration: %d Total loss : %f CE loss : %f Dice loss : %f'  %
                     (iter_num, loss_total.item(), lka_loss_seg.item(), lka_loss_seg_dice.item(),))
 
             ## change lr

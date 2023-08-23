@@ -10,7 +10,7 @@ from networks.dynunet_block import get_conv_layer, UnetResBlock
 
 einops, _ = optional_import("einops")
 
-class UnetrPPEncoder(nn.Module):
+class D_LKA_NetEncoder(nn.Module):
     def __init__(self, input_size=[32 * 32 * 32, 16 * 16 * 16, 8 * 8 * 8, 4 * 4 * 4],dims=[32, 64, 128, 256],
                  proj_size =[64,64,64,32], depths=[3, 3, 3, 3],  num_heads=4, spatial_dims=3, in_channels=1, dropout=0.0, transformer_dropout_rate=0.15 , trans_block=TransformerBlock, **kwargs):
         super().__init__()
@@ -70,7 +70,7 @@ class UnetrPPEncoder(nn.Module):
         return x, hidden_states
 
 
-class UnetrUpBlock(nn.Module):
+class D_LKA_NetUpBlock(nn.Module):
     def     __init__(
             self,
             spatial_dims: int,

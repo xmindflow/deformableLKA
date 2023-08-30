@@ -1,16 +1,36 @@
 # 3D D-LKA Net
 Instructions for the 3D D-LKA Net.
 
+## Environment Setup
+1. Create a new conda environment with python version 3.8.16:
+    ```bash
+    conda create -n "d_lka_net_3d" python=3.8.16
+    conda activate d_lka_net_3d
+    ```
+2. Install the requirements with:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+## Model weights
+You can download the learned weights of the DAEFormer in the following table. 
+
+Task | Learned weights
+------------ | ----
+Multi organ segmentation | D-LKA Net TODO
+Pancreas | D-LKA Net TODO
+
 ## Synapse Dataset
 
-1. Download the Synapse dataset from here: TODO add link
-2. Adjust the paths in the **run_training_synappse.sh**
-3. Run the following lines: 
+1. Download the Synapse dataset from here: [Synapse](https://mbzuaiac-my.sharepoint.com/personal/abdelrahman_youssief_mbzuai_ac_ae/_layouts/15/onedrive.aspx?id=%2Fpersonal%2Fabdelrahman%5Fyoussief%5Fmbzuai%5Fac%5Fae%2FDocuments%2FUNETR%2B%2B%2FDATASET%5FSynapse%2Ezip&parent=%2Fpersonal%2Fabdelrahman%5Fyoussief%5Fmbzuai%5Fac%5Fae%2FDocuments%2FUNETR%2B%2B&ga=1)
+2. Rename each folder containing 'unetr_pp' to 'd_lka_former'. THIS IS IMPORTANT.
+3. Adjust the paths in the **run_training_synappse.sh**
+4. Run the following lines: 
     ```bash
     cd 3D
     bash run_training_synapse.sh
     ```
-4. After the training is finished, run the evaluation:
+5. After the training is finished, run the evaluation:
     ```bash
     run_evaluation_synapse.sh
     ```

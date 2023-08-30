@@ -10,18 +10,27 @@ You can download the learned weights of the DAEFormer in the following table.
 
 Task | Dataset |Learned weights
 ------------ | -------------|----
-Multi organ segmentation | [Synapse](https://drive.google.com/uc?export=download&id=18I9JHH_i0uuEDg-N6d7bfMdf7Ut6bhBi) | [DAE-Former](https://drive.google.com/u/0/uc?id=1JEnicYtcMbU_PD_ujCPMaOH5_cs56EIO&export=download)
-Skin 2017 | Skin Dataset | D-LKA Net
-Skin 2018 | Skin Dataset | D-LKA Net
-PH2       | Skin Dataset | D-LKA Net
+Multi organ segmentation | [Synapse](https://drive.google.com/uc?export=download&id=18I9JHH_i0uuEDg-N6d7bfMdf7Ut6bhBi) | D-LKA Net TODO
+Skin 2017 | Skin Dataset | D-LKA Net TODO
+Skin 2018 | Skin Dataset | D-LKA Net TODO
+PH2       | Skin Dataset | D-LKA Net TODO
+
+## Environment Setup
+1. Create a new conda environment with python version 3.8.16:
+    ```bash
+    conda create -n "d_lka_net_2d" python=3.8.16
+    conda activate d_lka_net_2d
+    ```
+2. Install the requirements with:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
 ## Synapse Dataset
 ### Training and Testing
 1. Download the Synapse dataset from the link above.
-2. Install the requirements with:
 
-    `pip install -r requirements.txt`
-3. Run the code below to train D-LKA Net on the Synapse dataset.
+2. Run the code below to train D-LKA Net on the Synapse dataset.
     ```bash
     python train_MaxViT_deform_LKA.py --root_path ./data/Synapse/train_npz --test_path ./data/Synapse/test_vol_h5 --batch_size 20 --eval_interval 20
     ```
@@ -31,7 +40,7 @@ PH2       | Skin Dataset | D-LKA Net
 
     **--eval_interval** [Evaluation epoch]
 
-4. Run the below code to test the D-LKA Net on the Synapse dataset.
+3. Run the below code to test the D-LKA Net on the Synapse dataset.
     ```bash
     python test.py --volume_path ./data/Synapse/ --output_dir './model_out'
     ```

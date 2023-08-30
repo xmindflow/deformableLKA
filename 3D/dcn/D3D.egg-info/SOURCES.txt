@@ -1,0 +1,15 @@
+setup.py
+/home/leon/repos/D3Dnet/code/dcn/src/vision.cpp
+/home/leon/repos/D3Dnet/code/dcn/src/cpu/deform_cpu.cpp
+/home/leon/repos/D3Dnet/code/dcn/src/cuda/deform_conv_cuda.cu
+/home/leon/repos/deformableLKA/3D/dcn/src/vision.cpp
+/home/leon/repos/deformableLKA/3D/dcn/src/cpu/deform_cpu.cpp
+/home/leon/repos/deformableLKA/3D/dcn/src/cuda/deform_conv_cuda.cu
+D3D.egg-info/PKG-INFO
+D3D.egg-info/SOURCES.txt
+D3D.egg-info/dependency_links.txt
+D3D.egg-info/top_level.txt
+functions/__init__.py
+functions/deform_conv_func.py
+modules/__init__.py
+modules/deform_conv.py

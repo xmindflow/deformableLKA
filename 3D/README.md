@@ -7,9 +7,18 @@ Instructions for the 3D D-LKA Net.
     conda create -n "d_lka_net_3d" python=3.8.16
     conda activate d_lka_net_3d
     ```
-2. Install the requirements with:
+2. Install PyTorch and torchvision
+    ```bash
+    pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+    ```
+3. Install the requirements with:
     ```bash
     pip install -r requirements.txt
+    ```
+4. Install 3D deformable convolutions.
+    ```bash
+    cd dcn/
+    bash make.sh
     ```
 
 ## Model weights

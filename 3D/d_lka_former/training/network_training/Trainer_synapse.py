@@ -276,16 +276,17 @@ class Trainer_synapse(NetworkTrainer_synapse):
 
     def plot_network_architecture(self):
         try:
-            from batchgenerators.utilities.file_and_folder_operations import join
-            import hiddenlayer as hl
-            if torch.cuda.is_available():
-                g = hl.build_graph(self.network, torch.rand((1, self.num_input_channels, *self.patch_size)).cuda(),
-                                   transforms=None)
-            else:
-                g = hl.build_graph(self.network, torch.rand((1, self.num_input_channels, *self.patch_size)),
-                                   transforms=None)
-            g.save(join(self.output_folder, "network_architecture.pdf"))
-            del g
+            self.print_to_log_file(self.network)
+            #from batchgenerators.utilities.file_and_folder_operations import join
+            #import hiddenlayer as hl
+            #if torch.cuda.is_available():
+            #    g = hl.build_graph(self.network, torch.rand((1, self.num_input_channels, *self.patch_size)).cuda(),
+            #                       transforms=None)
+            #else:
+            #    g = hl.build_graph(self.network, torch.rand((1, self.num_input_channels, *self.patch_size)),
+            #                       transforms=None)
+            #g.save(join(self.output_folder, "network_architecture.pdf"))
+            #del g
         except Exception as e:
             self.print_to_log_file("Unable to plot network architecture:")
             self.print_to_log_file(e)

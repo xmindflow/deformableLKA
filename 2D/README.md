@@ -21,7 +21,11 @@ PH2       | Skin Dataset | D-LKA Net TODO
     conda create -n "d_lka_net_2d" python=3.8.16
     conda activate d_lka_net_2d
     ```
-2. Install the requirements with:
+2. Install PyTorch and torchvision
+    ```bash
+    pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+    ```
+3. Install the requirements with:
     ```bash
     pip install -r requirements.txt
     ```

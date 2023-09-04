@@ -9,7 +9,7 @@ Reza Azad<sup>1</sup>, Leon Niggemeier<sup>1</sup>, Michael Hüttemann<sup>1</su
 <sup>6</sup>Fraunhofer Institute for Digital Medicine MEVIS, Bremen, Germany
 
 
-[![paper](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)]()
+[![paper](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/abs/2309.00121)
 
 
 

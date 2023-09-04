@@ -1,14 +1,6 @@
 # Beyond Self-Attention: Deformable Large Kernel Attention for Medical Image Segmentation
 Reza Azad<sup>1</sup>, Leon Niggemeier<sup>1</sup>, Michael Hüttemann<sup>1</sup>, Amirhossein Kazerouni<sup>2</sup>, Ehsan Khodapanah Aghdam<sup>3</sup>, Yury Velichko<sup>4</sup>, Ulas Bagci<sup>4</sup>, Dorit Merhof<sup>5,6</sup>
 
-<sup>1</sup>Faculty of Eletrical Engineering and Information Technology, RWTH Aachen University, Aachen, Germany  
-<sup>2</sup>School of Electrical Engineering, Iran University of Science and Technology, Tehran, Iran  
-<sup>3</sup>Department of Electrical Engineering, Shahid Beheshti University, Tehran, Iran  
-<sup>4</sup>Department of Radiology, Northwestern University, Chicago, USA  
-<sup>5</sup>Faculty of Informatics and Data Science, University of Regensburg, Regensburg, Germany  
-<sup>6</sup>Fraunhofer Institute for Digital Medicine MEVIS, Bremen, Germany
-
-
 [![paper](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/abs/2309.00121)
 
 

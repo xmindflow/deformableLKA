@@ -35,3 +35,14 @@ All implementations done by Leon Niggemeier. For any query please contact us for
 ```python
 leon.niggemeier@rwth-aachen.de
 ```
+
+## Citation
+
+```bibtex
+@article{azad2023beyond,
+  title={Beyond Self-Attention: Deformable Large Kernel Attention for Medical Image Segmentation},
+  author={Azad, Reza and Niggemeier, Leon and Huttemann, Michael and Kazerouni, Amirhossein and Aghdam, Ehsan Khodapanah and Velichko, Yury and Bagci, Ulas and Merhof, Dorit},
+  journal={arXiv preprint arXiv:2309.00121},
+  year={2023}
+}
+```

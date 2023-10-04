@@ -34,7 +34,7 @@ opencv-python==4.7.0.72
 opencv-python-headless==4.7.0.72
 packaging==23.1
 pandas==2.0.1
-Pillow==9.5.0
+Pillow==10.0.1
 pip==23.0.1
 portalocker==2.7.0
 protobuf==3.20.3

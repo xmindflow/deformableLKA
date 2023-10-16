@@ -22,7 +22,7 @@ Instructions for the 3D D-LKA Net.
     ```
 
 ## Model weights
-You can download the learned weights of the DAEFormer in the following table. 
+You can download the learned weights of the D-LKA-Net in the following table. 
 
 Task | Learned weights
 ------------ | ----

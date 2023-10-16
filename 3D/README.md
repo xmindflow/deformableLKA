@@ -26,8 +26,8 @@ You can download the learned weights of the DAEFormer in the following table.
 
 Task | Learned weights
 ------------ | ----
-Multi organ segmentation | D-LKA Net TODO
-Pancreas | D-LKA Net TODO
+Multi organ segmentation | [D-LKA Net](https://drive.google.com/drive/folders/1Q_V1uNYR7EKkO0dxO8HucD4HgkOfupdc?usp=sharing)
+Pancreas | [D-LKA Net](https://drive.google.com/drive/folders/1mSbs-p5gwA2dUbNKJ-xQ08Z717XFbqJ_?usp=sharing)
 
 ## Synapse Dataset
 

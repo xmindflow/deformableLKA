@@ -25,6 +25,7 @@ For detailed instruction for the 3D methods, please refer to the [Readme](3D/REA
 
 
 ## Updates
+16.10.2023 | Release of 2D, 3D Synapse weights and 3D Pancreas weights.
 
 ## Acknowledgement
 This repository is built based on [nnFormer](https://github.com/282857341/nnFormer), [UNETR++](https://github.com/Amshaker/unetr_plus_plus), [transnorm](https://github.com/rezazad68/transnorm), [MCF](https://github.com/WYC-321/MCF), [D3D](https://github.com/XinyiYing/D3Dnet/tree/master). We thank the authors for their code repositories.

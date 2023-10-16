@@ -6,11 +6,11 @@ Instructions for the 2D version of the D-LKA net.
 
 
 ## Model weights
-You can download the learned weights of the DAEFormer in the following table. 
+You can download the learned weights of the D-LKA Net in the following table. 
 
 Task | Dataset |Learned weights
 ------------ | -------------|----
-Multi organ segmentation | [Synapse](https://drive.google.com/uc?export=download&id=18I9JHH_i0uuEDg-N6d7bfMdf7Ut6bhBi) | D-LKA Net TODO
+Multi organ segmentation | [Synapse](https://drive.google.com/uc?export=download&id=18I9JHH_i0uuEDg-N6d7bfMdf7Ut6bhBi) | [D-LKA Net 2D](https://drive.google.com/drive/folders/1TY7G0X32kGbgnzx_Zn5px0gW8fVF4ptI?usp=sharing)
 Skin 2017 | Skin Dataset | D-LKA Net TODO
 Skin 2018 | Skin Dataset | D-LKA Net TODO
 PH2       | Skin Dataset | D-LKA Net TODO

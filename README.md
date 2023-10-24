@@ -1,5 +1,5 @@
 # Beyond Self-Attention: Deformable Large Kernel Attention for Medical Image Segmentation <br> <span style="float: right"><sub><sup>WACV 2024</sub></sup></span>
-[![arXiv](https://img.shields.io/badge/arXiv-2309.00108-b31b1b.svg)](https://arxiv.org/abs/2309.00121)
+[![arXiv](https://img.shields.io/badge/arXiv-2309.00121-b31b1b.svg)](https://arxiv.org/abs/2309.00121)
 
 
 We have introduced a novel approach called **Deformable Large Kernel Attention (D-LKA Attention)** to enhance medical image segmentation. This method efficiently captures volumetric context using large convolution kernels, avoiding excessive computational demands. D-LKA Attention also benefits from deformable convolutions to adapt to diverse data patterns. We've created both 2D and 3D versions, with the 3D version excelling in cross-depth data understanding. This forms the basis of our new hierarchical Vision Transformer architecture, the *D-LKA Net*, which outperforms existing methods on popular medical segmentation datasets (Synapse, NIH Pancreas, and Skin lesion).

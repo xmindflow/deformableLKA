@@ -26,7 +26,6 @@ loguru==0.7.0
 matplotlib==3.7.1
 MedPy==0.4.0
 ml-collections==0.1.1
-mmcv-full==1.7.1
 networkx==3.1
 nibabel==5.1.0
 numpy==1.23.1
@@ -63,10 +62,6 @@ threadpoolctl==3.1.0
 tifffile==2023.4.12
 timm==0.6.13
 tomli==2.0.1
-torch==1.11.0+cu113
-torchaudio==0.11.0+cu113
-torchsummary==1.5.1
-torchvision==0.12.0+cu113
 tqdm==4.65.0
 typing_extensions==4.5.0
 tzdata==2023.3

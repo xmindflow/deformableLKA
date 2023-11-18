@@ -49,21 +49,21 @@ from torch.utils.checkpoint import checkpoint
 
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
-from networks.merit_lib.models_timm.helpers import build_model_with_cfg, checkpoint_seq, named_apply
-from networks.merit_lib.models_timm.fx_features import register_notrace_function
-from networks.merit_lib.models_timm.layers import Mlp, ConvMlp, DropPath, ClassifierHead, trunc_normal_tf_, LayerNorm2d, LayerNorm
-from networks.merit_lib.models_timm.layers import create_attn, get_act_layer, get_norm_layer, get_norm_act_layer, create_conv2d
-from networks.merit_lib.models_timm.layers import to_2tuple, extend_tuple, make_divisible, _assert
-from networks.merit_lib.models_timm.registry import register_model
-from networks.merit_lib.models_timm.vision_transformer_relpos import RelPosMlp, RelPosBias  # FIXME move these to common location
+#from networks.merit_lib.models_timm.helpers import build_model_with_cfg, checkpoint_seq, named_apply
+#from networks.merit_lib.models_timm.fx_features import register_notrace_function
+#from networks.merit_lib.models_timm.layers import Mlp, ConvMlp, DropPath, ClassifierHead, trunc_normal_tf_, LayerNorm2d, LayerNorm
+#from networks.merit_lib.models_timm.layers import create_attn, get_act_layer, get_norm_layer, get_norm_act_layer, create_conv2d
+#from networks.merit_lib.models_timm.layers import to_2tuple, extend_tuple, make_divisible, _assert
+#from networks.merit_lib.models_timm.registry import register_model
+#from networks.merit_lib.models_timm.vision_transformer_relpos import RelPosMlp, RelPosBias  # FIXME move these to common location
 
-#from merit_lib.models_timm.helpers import build_model_with_cfg, checkpoint_seq, named_apply
-#from merit_lib.models_timm.fx_features import register_notrace_function
-#from merit_lib.models_timm.layers import Mlp, ConvMlp, DropPath, ClassifierHead, trunc_normal_tf_, LayerNorm2d, LayerNorm
-#from merit_lib.models_timm.layers import create_attn, get_act_layer, get_norm_layer, get_norm_act_layer, create_conv2d
-#from merit_lib.models_timm.layers import to_2tuple, extend_tuple, make_divisible, _assert
-#from merit_lib.models_timm.registry import register_model
-#from merit_lib.models_timm.vision_transformer_relpos import RelPosMlp, RelPosBias  # FIXME move these to common location
+from merit_lib.models_timm.helpers import build_model_with_cfg, checkpoint_seq, named_apply
+from merit_lib.models_timm.fx_features import register_notrace_function
+from merit_lib.models_timm.layers import Mlp, ConvMlp, DropPath, ClassifierHead, trunc_normal_tf_, LayerNorm2d, LayerNorm
+from merit_lib.models_timm.layers import create_attn, get_act_layer, get_norm_layer, get_norm_act_layer, create_conv2d
+from merit_lib.models_timm.layers import to_2tuple, extend_tuple, make_divisible, _assert
+from merit_lib.models_timm.registry import register_model
+from merit_lib.models_timm.vision_transformer_relpos import RelPosMlp, RelPosBias  # FIXME move these to common location
 
 __all__ = ['MaxxVitCfg', 'MaxxVitConvCfg', 'MaxxVitTransformerCfg', 'MaxxVit']
 

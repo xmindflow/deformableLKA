@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torchvision
-from mmcv.ops import DeformConv2d
+
 #from ops.dcn import DeformConv
 import time
 

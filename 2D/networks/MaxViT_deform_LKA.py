@@ -4,7 +4,8 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 from torch.nn import functional as F
 
-from networks.segformer import *
+#from .networks.segformer import *
+from segformer import *
 #from segformer import *
 
 ##################################
@@ -14,7 +15,8 @@ from networks.segformer import *
 ##################################
 
 from timm.models.layers import DropPath
-from deformable_LKA.deformable_LKA import deformable_LKA_Attention
+#from deformable_LKA.deformable_LKA import deformable_LKA_Attention
+from deformable_LKA import deformable_LKA_Attention
 
 
 class DWConvLKA(nn.Module):
@@ -577,9 +579,11 @@ class MyDecoderLayer(nn.Module):
             self.last_layer = nn.Conv2d(out_dim, n_class, 1)
 
         #self.layer_former_1 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
-        self.layer_lka_1 = deformableLKABlock(dim=out_dim) # TODO
+        #self.layer_lka_1 = deformableLKABlock(dim=out_dim) # TODO
+        self.layer_lka_1 = nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+        self.layer_lka_2 =nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
         #self.layer_former_2 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
-        self.layer_lka_2 = deformableLKABlock(dim=out_dim) # TODO
+        #self.layer_lka_2 = deformableLKABlock(dim=out_dim) # TODO
 
         def init_weights(self):
             for m in self.modules():
@@ -599,20 +603,26 @@ class MyDecoderLayer(nn.Module):
 
     def forward(self, x1, x2=None):
         if x2 is not None:  # skip connection exist
-            b, h, w, c = x2.shape # 1 28 28 320, 1 56 56 128
-            x2 = x2.view(b, -1, c) # 1 784 320, 1 3136 128
+
+            #b, c, h, w = x1.shape
+            b2, h2, w2, c2 = x2.shape # 1 28 28 320, 1 56 56 128
+            x2 = x2.view(b2, -1, c2) # 1 784 320, 1 3136 128
             x1_expand = self.x1_linear(x1) # 1 784 256 --> 1 784 320, 1 3136 160 --> 1 3136 128
-            
+
             #cat_linear_x = self.concat_linear(self.cross_attn(x1_expand, x2)) # 1 784 320, 1 3136 128
             cat_linear_x = x1_expand + x2 # Simply add them in the first step. TODO: Add more complex skip connection here
-
+            cat_linear_x = cat_linear_x.view(cat_linear_x.size(0), cat_linear_x.size(2), cat_linear_x.size(1) // w2,
+                                             cat_linear_x.size(1) // h2)
             #tran_layer_1 = self.layer_former_1(cat_linear_x, h, w) # 1 784 320, 1 3136 128
-            tran_layer_1 = self.layer_lka_1(cat_linear_x, h, w)
+            #tran_layer_1 = self.layer_lka_1(cat_linear_x, h, w)
+            tran_layer_1 = self.layer_lka_1(cat_linear_x)
+            tran_layer_2 = self.layer_lka_2(cat_linear_x)
             #tran_layer_2 = self.layer_former_2(tran_layer_1, h, w) # 1 784 320, 1 3136 128
-            tran_layer_2 = self.layer_lka_2(tran_layer_1, h, w) #self.layer_lka_1(tran_layer_1, h, w) # Here has to be a 2! LEON CHANGE THIS!!!!
-
+            #tran_layer_2 = self.layer_lka_2(tran_layer_1, h, w) #self.layer_lka_1(tran_layer_1, h, w) # Here has to be a 2! LEON CHANGE THIS!!!!
+            tran_layer_2 = tran_layer_2.view(tran_layer_2.size(0), tran_layer_2.size(3) * tran_layer_2.size(2),
+                                             tran_layer_2.size(1))
             if self.last_layer:
-                out = self.last_layer(self.layer_up(tran_layer_2).view(b, 4 * h, 4 * w, -1).permute(0, 3, 1, 2)) # 1 9 224 224
+                out = self.last_layer(self.layer_up(tran_layer_2).view(b2, 4 * h2, 4 * w2, -1).permute(0, 3, 1, 2)) # 1 9 224 224
             else:
                 out = self.layer_up(tran_layer_2) # 1 3136 160
         else:
@@ -625,9 +635,10 @@ class MyDecoderLayer(nn.Module):
 # MaxViT stuff
 #
 ##########################################
-#from merit_lib.networks import MaxViT4Out_Small, MaxViT4Out_Small3D
-from networks.merit_lib.networks import MaxViT4Out_Small
-
+#from .merit_lib.networks import MaxViT4Out_Small#, MaxViT4Out_Small3D
+#from networks.merit_lib.networks import MaxViT4Out_Small
+from merit_lib.networks import MaxViT4Out_Small
+from merit_lib.decoders import CASCADE_Add, CASCADE_Cat
 
 
 
@@ -686,7 +697,7 @@ class MaxViT_deformableLKAFormer(nn.Module):
         output_enc_3, output_enc_2, output_enc_1, output_enc_0 = self.backbone(x)
 
         b, c, _, _ = output_enc_3.shape
-
+        #print(output_enc_3.shape)
         # ---------------Decoder-------------------------
         tmp_3 = self.decoder_3(output_enc_3.permute(0, 2, 3, 1).view(b, -1, c))
         tmp_2 = self.decoder_2(tmp_3, output_enc_2.permute(0, 2, 3, 1))
@@ -699,9 +710,23 @@ class MaxViT_deformableLKAFormer(nn.Module):
 if __name__ == "__main__":
     
 
-    input = torch.rand((2,3,224,224)).cuda(0)
+    input0 = torch.rand((1,3,224,224)).cuda(0)
+    input = torch.randn((1,768,7,7)).cuda(0)
+    input2 = torch.randn((1,384,14, 14)).cuda(0)
+    input3 = torch.randn((1, 192, 28, 28)).cuda(0)
+    #b, c, _, _ = input.shape
+    dec1 = MyDecoderLayer(input_size=(7,7), in_out_chan= ([768, 768, 768, 768, 768]), head_count=1,
+                          token_mlp_mode='mix_skip').cuda(0)
+    dec2 = MyDecoderLayer(input_size=(14, 14), in_out_chan=([384, 384, 384, 384, 384]), head_count=1,
+                          token_mlp_mode='mix_skip').cuda(0)
+    dec3 = MyDecoderLayer(input_size=(28, 28), in_out_chan=([192, 192, 192, 192, 192]), head_count=1,
+                          token_mlp_mode='mix_skip').cuda(0)
+    #output = dec1(input.permute(0, 2, 3, 1).view(b, -1 , c))
+    #output2 = dec2(output, input2.permute(0, 2, 3, 1))
+    #output3 = dec3(output2, input3.permute(0, 2, 3, 1))
 
     net = MaxViT_deformableLKAFormer().cuda(0)
 
-    output = net(input)
-    print("Out shape: " + str(output.shape))
+    output0 = net(input0)
+    #print("Out shape: " + str(output.shape) + 'Out2 shape:' + str(output2.shape)+"Out shape3: " + str(output3.shape))
+    print("Out shape: " + str(output0.shape))

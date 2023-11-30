@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 
-from networks.MaxViT_deform_LKA import  MaxViT_deformableLKAFormer
+from networks.MaxViT_deform_LKA import  MaxViT_deformableLKAFormer2, MaxViT_deformableLKAFormer3, MaxViT_deformableLKAFormer4, MaxViT_deformableLKAFormer5, MaxViT_deformableLKAFormer6,MaxViT_deformableLKAFormer7
 from trainer_MaxViT_deform_LKA import trainer_synapse
 
 from fvcore.nn import FlopCountAnalysis
@@ -33,13 +33,14 @@ parser.add_argument(
 parser.add_argument("--dataset", type=str, default="Synapse", help="experiment_name")
 parser.add_argument("--list_dir", type=str, default="./lists/lists_Synapse", help="list dir")
 parser.add_argument("--num_classes", type=int, default=9, help="output channel of network")
-parser.add_argument("--output_dir", type=str, default="./model_out/MaxViT_deform_LKA_two_layer", help="output dir")
+#parser.add_argument("--output_dir", type=str, default="./model_out/MaxViT_deform_LKA_Conv", help="output dir")
+parser.add_argument("--output_dir", type=str, default="./model_out2/MaxViT_deform_LKA_two_layer", help="output dir")
 parser.add_argument("--max_iterations", type=int, default=90000, help="maximum epoch number to train")
 parser.add_argument("--max_epochs", type=int, default=400, help="maximum epoch number to train")
 parser.add_argument("--batch_size", type=int, default=24, help="batch_size per gpu")
 parser.add_argument("--num_workers", type=int, default=8, help="num_workers")
 parser.add_argument("--eval_interval", type=int, default=20, help="eval_interval")
-parser.add_argument("--model_name", type=str, default="MaxViT_deform_LKA", help="model_name")
+parser.add_argument("--model_name", type=str, default="MaxViT_deform_LKA3", help="model_name")
 parser.add_argument("--n_gpu", type=int, default=1, help="total gpu")
 parser.add_argument("--deterministic", type=int, default=1, help="whether to use deterministic training")
 parser.add_argument("--base_lr", type=float, default=0.05, help="segmentation network base learning rate")
@@ -117,8 +118,19 @@ if __name__ == "__main__":
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
-
-    net = MaxViT_deformableLKAFormer().cuda(0)
+    if args.model_name == 'MaxViT_deform_LKA2':
+        net = MaxViT_deformableLKAFormer2().cuda(0)
+    elif args.model_name == 'MaxViT_deform_LKA3':
+        net = MaxViT_deformableLKAFormer3().cuda(0) # GA
+    elif args.model_name == 'MaxViT_deform_LKA4':
+        net = MaxViT_deformableLKAFormer4().cuda(0) # EfCBAM
+    elif args.model_name == 'MaxViT_deform_LKA5':
+        net = MaxViT_deformableLKAFormer5().cuda(0) # GA + EfCBAM
+    elif args.model_name == 'MaxViT_deform_LKA6':
+        net = MaxViT_deformableLKAFormer6().cuda(0) # ECA
+    elif args.model_name == 'MaxViT_deform_LKA7':
+        net = MaxViT_deformableLKAFormer7().cuda(0) # ECA + GA
+    
     input = torch.rand((1,3,224,224)).cuda(0)
     n_parameters = sum(p.numel() for p in net.parameters() if p.requires_grad)
     flops = FlopCountAnalysis(net, input)

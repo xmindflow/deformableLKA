@@ -26,7 +26,7 @@ parser.add_argument(
 parser.add_argument("--dataset", type=str, default="Synapse", help="experiment_name")
 parser.add_argument("--num_classes", type=int, default=9, help="output channel of network")
 parser.add_argument("--list_dir", type=str, default="./lists/lists_Synapse", help="list dir")
-parser.add_argument("--output_dir", type=str, default="./model_out", help="output dir")
+parser.add_argument("--output_dir", type=str, default="./model_out/", help="output dir")
 parser.add_argument("--max_iterations", type=int, default=30000, help="maximum epoch number to train")
 parser.add_argument("--max_epochs", type=int, default=400, help="maximum epoch number to train")
 parser.add_argument("--batch_size", type=int, default=24, help="batch_size per gpu")
@@ -131,12 +131,13 @@ if __name__ == "__main__":
     args.Dataset = dataset_config[dataset_name]["Dataset"]
     args.z_spacing = dataset_config[dataset_name]["z_spacing"]
     args.is_pretrain = True
-
+    
     net = MaxViT_deformableLKAFormer(num_classes=args.num_classes).cuda(0)
-
+    
     snapshot = os.path.join(args.output_dir, "best_model.pth")
     if not os.path.exists(snapshot):
-        snapshot = snapshot.replace("best_model", "transfilm_epoch_" + str(args.max_epochs - 1))
+        #snapshot = snapshot.replace("best_model", "transfilm_epoch_" + str(args.max_epochs - 1))
+        snapshot = snapshot.replace("best_model","MaxViT_deform_LKA_two_layer/MaxViT_deform_LKA_seed_1234_epoch_359")
     msg = net.load_state_dict(torch.load(snapshot))
     print("self trained swin unet", msg)
     snapshot_name = snapshot.split("/")[-1]

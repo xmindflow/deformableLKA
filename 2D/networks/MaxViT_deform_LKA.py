@@ -5,19 +5,20 @@ from einops.layers.torch import Rearrange
 from torch.nn import functional as F
 
 #from .networks.segformer import *
-from segformer import *
+from .segformer import *
 #from segformer import *
 
+
+import math
 ##################################
 #
 # LKA Modules
 #
 ##################################
 
-from timm.models.layers import DropPath
+from timm.models.layers import DropPath, to_2tuple
 #from deformable_LKA.deformable_LKA import deformable_LKA_Attention
-from deformable_LKA import deformable_LKA_Attention
-
+from .deformable_LKA import deformable_LKA_Attention
 
 class DWConvLKA(nn.Module):
     def __init__(self, dim=768):
@@ -153,6 +154,7 @@ class deformableLKABlock(nn.Module):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim) #build_norm_layer(norm_cfg, dim)[1]
         self.attn = deformable_LKA_Attention(dim)
+        #self.attn = DAttentionBaseline()
         self.drop_path = DropPath(
             drop_path) if drop_path > 0. else nn.Identity()
 
@@ -542,6 +544,198 @@ class FinalPatchExpand_X4(nn.Module):
         x = self.norm(x.clone())
 
         return x
+## CBAM + SRM
+## By: Sina 
+class BasicConv(nn.Module):
+    def __init__(self, in_planes, out_planes, kernel_size, stride=1, padding=0, dilation=1, groups=1, relu=True, bn=True, bias=False):
+        super(BasicConv, self).__init__()
+        self.out_channels = out_planes
+        self.conv = nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+        self.bn = nn.BatchNorm2d(out_planes,eps=1e-5, momentum=0.01, affine=True) if bn else None
+        self.relu = nn.ReLU() if relu else None
+
+    def forward(self, x):
+        x = self.conv(x)
+        if self.bn is not None:
+            x = self.bn(x)
+        if self.relu is not None:
+            x = self.relu(x)
+        return x
+
+class Flatten(nn.Module):
+    def forward(self, x):
+        return x.view(x.size(0), -1)
+
+class ChannelGate(nn.Module):
+    def __init__(self, gate_channels, reduction_ratio=16, pool_types=['avg', 'max']):
+        super(ChannelGate, self).__init__()
+        self.gate_channels = gate_channels
+        self.mlp = nn.Sequential(
+            Flatten(),
+            nn.Linear(gate_channels, gate_channels // reduction_ratio),
+            nn.ReLU(),
+            nn.Linear(gate_channels // reduction_ratio, gate_channels)
+            )
+        self.pool_types = pool_types
+    def forward(self, x):
+        channel_att_sum = None
+        for pool_type in self.pool_types:
+            if pool_type=='avg':
+                avg_pool = F.avg_pool2d( x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
+                channel_att_raw = self.mlp( avg_pool )
+            elif pool_type=='max':
+                max_pool = F.max_pool2d( x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
+                channel_att_raw = self.mlp( max_pool )
+            elif pool_type=='lp':
+                lp_pool = F.lp_pool2d( x, 2, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
+                channel_att_raw = self.mlp( lp_pool )
+            elif pool_type=='lse':
+                # LSE pool only
+                lse_pool = logsumexp_2d(x)
+                channel_att_raw = self.mlp( lse_pool )
+
+            if channel_att_sum is None:
+                channel_att_sum = channel_att_raw
+            else:
+                channel_att_sum = channel_att_sum + channel_att_raw
+
+        scale = F.sigmoid( channel_att_sum ).unsqueeze(2).unsqueeze(3).expand_as(x)
+        return x * scale
+
+def logsumexp_2d(tensor):
+    tensor_flatten = tensor.view(tensor.size(0), tensor.size(1), -1)
+    s, _ = torch.max(tensor_flatten, dim=2, keepdim=True)
+    outputs = s + (tensor_flatten - s).exp().sum(dim=2, keepdim=True).log()
+    return outputs
+
+class ChannelPool(nn.Module):
+    def forward(self, x):
+        return torch.cat( (torch.max(x,1)[0].unsqueeze(1), torch.mean(x,1).unsqueeze(1)), dim=1 )
+
+class SpatialGate(nn.Module):
+    def __init__(self):
+        super(SpatialGate, self).__init__()
+        kernel_size = 7
+        self.compress = ChannelPool()
+        self.spatial = BasicConv(2, 1, kernel_size, stride=1, padding=(kernel_size-1) // 2, relu=False)
+    def forward(self, x):
+        x_compress = self.compress(x)
+        x_out = self.spatial(x_compress)
+        scale = F.sigmoid(x_out) # broadcasting
+        return x * scale
+
+class ECALayer(nn.Module):
+    def __init__(self, channels, gamma=2, b=1):
+        super().__init__()
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        t = int(abs((math.log(channels, 2) + b) / gamma))
+        k = t if t % 2 else t + 1
+        self.conv = nn.Conv1d(1, 1, kernel_size=k, padding=(k - 1) // 2, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        y = self.avgpool(x)
+        y = self.conv(y.squeeze(-1).transpose(-1, -2)).transpose(-1, -2).unsqueeze(-1)
+        y = self.sigmoid(y)
+        return x * y.expand_as(x)
+class CBAM(nn.Module):
+    def __init__(self, gate_channels, reduction_ratio=16, pool_types=['avg', 'max'], no_spatial=False):
+        super(CBAM, self).__init__()
+        self.ChannelGate = ChannelGate(gate_channels, reduction_ratio, pool_types)
+        self.no_spatial=no_spatial
+        if not no_spatial:
+            self.SpatialGate = SpatialGate()
+    def forward(self, x):
+        x_out = self.ChannelGate(x)
+        if not self.no_spatial:
+            x_out = self.SpatialGate(x_out)
+        return x_out
+class EfCBAM(nn.Module):
+    def __init__(self, gate_channels, no_spatial=False):
+        super(EfCBAM, self).__init__()
+        #self.ChannelGate = ChannelGate(gate_channels, reduction_ratio, pool_types)
+        self.ChannelGate = ECALayer(gate_channels, gamma=2, b = 1)
+        self.no_spatial=no_spatial
+        if not no_spatial:
+            self.SpatialGate = SpatialGate()
+    def forward(self, x):
+        x_out = self.ChannelGate(x)
+        if not self.no_spatial:
+            x_out = self.SpatialGate(x_out)
+        return x_out
+class SELayer(nn.Module):
+    def __init__(self, channel, reduction=16):
+        super(SELayer, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channel, channel // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channel // reduction, channel, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y.expand_as(x)
+
+
+class SRMLayer(nn.Module):
+    def __init__(self, channel, reduction=None):
+        # Reduction for compatibility with layer_block interface
+        super(SRMLayer, self).__init__()
+
+        # CFC: channel-wise fully connected layer
+        self.cfc = nn.Conv1d(channel, channel, kernel_size=2, bias=False,
+                             groups=channel)
+        self.bn = nn.BatchNorm1d(channel)
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+
+        # Style pooling
+        mean = x.view(b, c, -1).mean(-1).unsqueeze(-1)
+        std = x.view(b, c, -1).std(-1).unsqueeze(-1)
+        u = torch.cat((mean, std), -1)  # (b, c, 2)
+
+        # Style integration
+        z = self.cfc(u)  # (b, c, 1)
+        z = self.bn(z)
+        g = torch.sigmoid(z)
+        g = g.view(b, c, 1, 1)
+
+        return x * g.expand_as(x)
+
+
+class Gated_Attention_block(nn.Module):
+    def __init__(self, F_g, F_l, F_int):
+        super(Gated_Attention_block, self).__init__()
+        self.W_g = nn.Sequential(
+            nn.Conv2d(F_g, F_int, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.BatchNorm2d(F_int) #Gate - Signal (Encoder)
+        )
+
+        self.W_x = nn.Sequential(
+            nn.Conv2d(F_l, F_int, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.BatchNorm2d(F_int) #X - Signal (Decoder)
+        )
+
+        self.psi = nn.Sequential(
+            nn.Conv2d(F_int, 1, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.BatchNorm2d(1),
+            nn.Sigmoid()
+        ) # The Second part of attn
+
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, g, x):
+        g1 = self.W_g(g)
+        x1 = self.W_x(x)
+        psi = self.relu(g1 + x1)
+        psi = self.psi(psi)
+
+        return x * psi
 
 
 class MyDecoderLayer(nn.Module):
@@ -612,7 +806,7 @@ class MyDecoderLayer(nn.Module):
             #cat_linear_x = self.concat_linear(self.cross_attn(x1_expand, x2)) # 1 784 320, 1 3136 128
             cat_linear_x = x1_expand + x2 # Simply add them in the first step. TODO: Add more complex skip connection here
             cat_linear_x = cat_linear_x.view(cat_linear_x.size(0), cat_linear_x.size(2), cat_linear_x.size(1) // w2,
-                                             cat_linear_x.size(1) // h2)
+                                             cat_linear_x.size(1) // h2) # B x C x H x W
             #tran_layer_1 = self.layer_former_1(cat_linear_x, h, w) # 1 784 320, 1 3136 128
             #tran_layer_1 = self.layer_lka_1(cat_linear_x, h, w)
             tran_layer_1 = self.layer_lka_1(cat_linear_x)
@@ -629,7 +823,617 @@ class MyDecoderLayer(nn.Module):
             out = self.layer_up(x1)
         return out
 
+##########################################
+#
+# Decoder2 : DLKA --> CBAM
+# By: Sina 
+##########################################
 
+class MyDecoderLayer2(nn.Module):
+    def __init__(
+        self, input_size, in_out_chan, head_count, token_mlp_mode, reduction_ratio, n_class=9, norm_layer=nn.LayerNorm, is_last=False
+    ):
+        super().__init__()
+        dims = in_out_chan[0]
+        out_dim = in_out_chan[1]
+        key_dim = in_out_chan[2]
+        value_dim = in_out_chan[3]
+        x1_dim = in_out_chan[4]
+        reduction_ratio = reduction_ratio
+        #print("Dim: {} | Out_dim: {} | Key_dim: {} | Value_dim: {} | X1_dim: {}".format(dims, out_dim, key_dim, value_dim, x1_dim))
+        if not is_last:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            #self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            #self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            #)
+            #self.concat_linear = nn.Linear(2 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = PatchExpand(input_resolution=input_size, dim=out_dim, dim_scale=2, norm_layer=norm_layer)
+            self.last_layer = None
+        else:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            #self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            #self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims * 2, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            #)
+            #self.concat_linear = nn.Linear(4 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = FinalPatchExpand_X4(
+                input_resolution=input_size, dim=out_dim, dim_scale=4, norm_layer=norm_layer
+            )
+            self.last_layer = nn.Conv2d(out_dim, n_class, 1)
+
+        #self.layer_former_1 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        #self.layer_lka_1 = deformableLKABlock(dim=out_dim) # TODO
+
+
+        #self.layer_lka_1 = nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+        #self.layer_lka_2 =nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+
+        self.layer_lka_1 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+        self.layer_lka_2 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+
+        #self.layer_former_2 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        #self.layer_lka_2 = deformableLKABlock(dim=out_dim) # TODO
+
+        def init_weights(self):
+            for m in self.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.LayerNorm):
+                    nn.init.ones_(m.weight)
+                    nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.Conv2d):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+
+        init_weights(self)
+
+    def forward(self, x1, x2=None):
+        if x2 is not None:  # skip connection exist
+
+            #b, c, h, w = x1.shape
+            b2, h2, w2, c2 = x2.shape # 1 28 28 320, 1 56 56 128
+            x2 = x2.view(b2, -1, c2) # 1 784 320, 1 3136 128
+            x1_expand = self.x1_linear(x1) # 1 784 256 --> 1 784 320, 1 3136 160 --> 1 3136 128
+
+            #cat_linear_x = self.concat_linear(self.cross_attn(x1_expand, x2)) # 1 784 320, 1 3136 128
+            cat_linear_x = x1_expand + x2 # Simply add them in the first step. TODO: Add more complex skip connection here
+            cat_linear_x = cat_linear_x.view(cat_linear_x.size(0), cat_linear_x.size(2), cat_linear_x.size(1) // w2,
+                                             cat_linear_x.size(1) // h2)
+            #tran_layer_1 = self.layer_former_1(cat_linear_x, h, w) # 1 784 320, 1 3136 128
+            #tran_layer_1 = self.layer_lka_1(cat_linear_x, h, w)
+            tran_layer_1 = self.layer_lka_1(cat_linear_x)
+            #print(tran_layer_1.shape)
+            tran_layer_2 = self.layer_lka_2(tran_layer_1)
+            #print(tran_layer_2.shape)
+            #tran_layer_2 = self.layer_former_2(tran_layer_1, h, w) # 1 784 320, 1 3136 128
+            #tran_layer_2 = self.layer_lka_2(tran_layer_1, h, w) #self.layer_lka_1(tran_layer_1, h, w) # Here has to be a 2! LEON CHANGE THIS!!!!
+            tran_layer_2 = tran_layer_2.view(tran_layer_2.size(0), tran_layer_2.size(3) * tran_layer_2.size(2),
+                                             tran_layer_2.size(1))
+            if self.last_layer:
+                out = self.last_layer(self.layer_up(tran_layer_2).view(b2, 4 * h2, 4 * w2, -1).permute(0, 3, 1, 2)) # 1 9 224 224
+            else:
+                out = self.layer_up(tran_layer_2) # 1 3136 160
+        else:
+            out = self.layer_up(x1)
+        return out
+
+
+class MyDecoderLayer3(nn.Module):
+    def __init__(
+            self, input_size, in_out_chan, head_count, token_mlp_mode, reduction_ratio, n_class=9,
+            norm_layer=nn.LayerNorm, is_last=False
+    ):
+        super().__init__()
+        dims = in_out_chan[0]
+        out_dim = in_out_chan[1]
+        key_dim = in_out_chan[2]
+        value_dim = in_out_chan[3]
+        x1_dim = in_out_chan[4]
+        reduction_ratio = reduction_ratio
+        # print("Dim: {} | Out_dim: {} | Key_dim: {} | Value_dim: {} | X1_dim: {}".format(dims, out_dim, key_dim, value_dim, x1_dim))
+        if not is_last:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            self.ag_attn = Gated_Attention_block(x1_dim, x1_dim, x1_dim)
+            # self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            # self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            # )
+            # self.concat_linear = nn.Linear(2 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = PatchExpand(input_resolution=input_size, dim=out_dim, dim_scale=2, norm_layer=norm_layer)
+            self.last_layer = None
+        else:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            self.ag_attn = Gated_Attention_block(x1_dim, x1_dim, x1_dim)
+            # self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            # self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims * 2, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            # )
+            # self.concat_linear = nn.Linear(4 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = FinalPatchExpand_X4(
+                input_resolution=input_size, dim=out_dim, dim_scale=4, norm_layer=norm_layer
+            )
+            self.last_layer = nn.Conv2d(out_dim, n_class, 1)
+
+        # self.layer_former_1 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        # self.layer_lka_1 = deformableLKABlock(dim=out_dim) # TODO
+
+        # self.layer_lka_1 = nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+        # self.layer_lka_2 =nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+
+        self.layer_lka_1 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+        self.layer_lka_2 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+
+        # self.layer_former_2 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        # self.layer_lka_2 = deformableLKABlock(dim=out_dim) # TODO
+
+        def init_weights(self):
+            for m in self.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.LayerNorm):
+                    nn.init.ones_(m.weight)
+                    nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.Conv2d):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+
+        init_weights(self)
+
+    def forward(self, x1, x2=None):
+        if x2 is not None:  # skip connection exist
+            x2 = x2.contiguous()
+            # b, c, h, w = x1.shape
+            b2, h2, w2, c2 = x2.shape  # 1 28 28 320, 1 56 56 128
+            x2 = x2.view(b2, -1, c2)  # 1 784 320, 1 3136 128
+            x1_expand = self.x1_linear(x1)  # 1 784 256 --> 1 784 320, 1 3136 160 --> 1 3136 128
+
+            # cat_linear_x = self.concat_linear(self.cross_attn(x1_expand, x2)) # 1 784 320, 1 3136 128
+            # cat_linear_x = x1_expand + x2 # Simply add them in the first step. TODO: Add more complex skip connection here
+
+            x2_new = x2.view(x2.size(0), x2.size(2), x2.size(1) // w2, x2.size(1) // h2)
+
+            x1_expand = x1_expand.view(x2.size(0), x2.size(2), x2.size(1) // w2, x2.size(1) // h2)
+
+            attn_gate = self.ag_attn(x1_expand, x2_new)
+
+            cat_linear_x = x1_expand + attn_gate
+
+            # tran_layer_1 = self.layer_former_1(cat_linear_x, h, w) # 1 784 320, 1 3136 128
+            # tran_layer_1 = self.layer_lka_1(cat_linear_x, h, w)
+            tran_layer_1 = self.layer_lka_1(cat_linear_x)
+            # print(tran_layer_1.shape)
+            tran_layer_2 = self.layer_lka_2(tran_layer_1)
+            # print(tran_layer_2.shape)
+            # tran_layer_2 = self.layer_former_2(tran_layer_1, h, w) # 1 784 320, 1 3136 128
+            # tran_layer_2 = self.layer_lka_2(tran_layer_1, h, w) #self.layer_lka_1(tran_layer_1, h, w) # Here has to be a 2! LEON CHANGE THIS!!!!
+            tran_layer_2 = tran_layer_2.view(tran_layer_2.size(0), tran_layer_2.size(3) * tran_layer_2.size(2),
+                                             tran_layer_2.size(1))
+            if self.last_layer:
+                out = self.last_layer(
+                    self.layer_up(tran_layer_2).view(b2, 4 * h2, 4 * w2, -1).permute(0, 3, 1, 2))  # 1 9 224 224
+            else:
+                out = self.layer_up(tran_layer_2)  # 1 3136 160
+        else:
+            out = self.layer_up(x1)
+        return out
+
+
+class MyDecoderLayer4(nn.Module):
+    def __init__(
+        self, input_size, in_out_chan, head_count, token_mlp_mode, reduction_ratio, n_class=9, norm_layer=nn.LayerNorm, is_last=False
+    ):
+        super().__init__()
+        dims = in_out_chan[0]
+        out_dim = in_out_chan[1]
+        key_dim = in_out_chan[2]
+        value_dim = in_out_chan[3]
+        x1_dim = in_out_chan[4]
+        reduction_ratio = reduction_ratio
+        #print("Dim: {} | Out_dim: {} | Key_dim: {} | Value_dim: {} | X1_dim: {}".format(dims, out_dim, key_dim, value_dim, x1_dim))
+        if not is_last:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            #self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            #self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            #)
+            #self.concat_linear = nn.Linear(2 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = PatchExpand(input_resolution=input_size, dim=out_dim, dim_scale=2, norm_layer=norm_layer)
+            self.last_layer = None
+        else:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            #self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            #self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims * 2, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            #)
+            #self.concat_linear = nn.Linear(4 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = FinalPatchExpand_X4(
+                input_resolution=input_size, dim=out_dim, dim_scale=4, norm_layer=norm_layer
+            )
+            self.last_layer = nn.Conv2d(out_dim, n_class, 1)
+
+        #self.layer_former_1 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        #self.layer_lka_1 = deformableLKABlock(dim=out_dim) # TODO
+
+
+        #self.layer_lka_1 = nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+        #self.layer_lka_2 =nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+
+        #self.layer_lka_1 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+        #self.layer_lka_2 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+
+        self.layer_lka_1 = EfCBAM(gate_channels=out_dim)
+        self.layer_lka_2 = EfCBAM(gate_channels=out_dim)
+        #self.layer_former_2 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        #self.layer_lka_2 = deformableLKABlock(dim=out_dim) # TODO
+
+        def init_weights(self):
+            for m in self.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.LayerNorm):
+                    nn.init.ones_(m.weight)
+                    nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.Conv2d):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+
+        init_weights(self)
+
+    def forward(self, x1, x2=None):
+        if x2 is not None:  # skip connection exist
+
+            #b, c, h, w = x1.shape
+            b2, h2, w2, c2 = x2.shape # 1 28 28 320, 1 56 56 128
+            x2 = x2.view(b2, -1, c2) # 1 784 320, 1 3136 128
+            x1_expand = self.x1_linear(x1) # 1 784 256 --> 1 784 320, 1 3136 160 --> 1 3136 128
+
+            #cat_linear_x = self.concat_linear(self.cross_attn(x1_expand, x2)) # 1 784 320, 1 3136 128
+            cat_linear_x = x1_expand + x2 # Simply add them in the first step. TODO: Add more complex skip connection here
+            cat_linear_x = cat_linear_x.view(cat_linear_x.size(0), cat_linear_x.size(2), cat_linear_x.size(1) // w2,
+                                             cat_linear_x.size(1) // h2)
+            #tran_layer_1 = self.layer_former_1(cat_linear_x, h, w) # 1 784 320, 1 3136 128
+            #tran_layer_1 = self.layer_lka_1(cat_linear_x, h, w)
+            tran_layer_1 = self.layer_lka_1(cat_linear_x)
+            #print(tran_layer_1.shape)
+            tran_layer_2 = self.layer_lka_2(tran_layer_1)
+            #print(tran_layer_2.shape)
+            #tran_layer_2 = self.layer_former_2(tran_layer_1, h, w) # 1 784 320, 1 3136 128
+            #tran_layer_2 = self.layer_lka_2(tran_layer_1, h, w) #self.layer_lka_1(tran_layer_1, h, w) # Here has to be a 2! LEON CHANGE THIS!!!!
+            tran_layer_2 = tran_layer_2.view(tran_layer_2.size(0), tran_layer_2.size(3) * tran_layer_2.size(2),
+                                             tran_layer_2.size(1))
+            if self.last_layer:
+                out = self.last_layer(self.layer_up(tran_layer_2).view(b2, 4 * h2, 4 * w2, -1).permute(0, 3, 1, 2)) # 1 9 224 224
+            else:
+                out = self.layer_up(tran_layer_2) # 1 3136 160
+        else:
+            out = self.layer_up(x1)
+        return out
+
+
+class MyDecoderLayer5(nn.Module):
+    def __init__(
+            self, input_size, in_out_chan, head_count, token_mlp_mode, reduction_ratio, n_class=9,
+            norm_layer=nn.LayerNorm, is_last=False
+    ):
+        super().__init__()
+        dims = in_out_chan[0]
+        out_dim = in_out_chan[1]
+        key_dim = in_out_chan[2]
+        value_dim = in_out_chan[3]
+        x1_dim = in_out_chan[4]
+        reduction_ratio = reduction_ratio
+        # print("Dim: {} | Out_dim: {} | Key_dim: {} | Value_dim: {} | X1_dim: {}".format(dims, out_dim, key_dim, value_dim, x1_dim))
+        if not is_last:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            self.ag_attn = Gated_Attention_block(x1_dim, x1_dim, x1_dim)
+            # self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            # self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            # )
+            # self.concat_linear = nn.Linear(2 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = PatchExpand(input_resolution=input_size, dim=out_dim, dim_scale=2, norm_layer=norm_layer)
+            self.last_layer = None
+        else:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            self.ag_attn = Gated_Attention_block(x1_dim, x1_dim, x1_dim)
+            # self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            # self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims * 2, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            # )
+            # self.concat_linear = nn.Linear(4 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = FinalPatchExpand_X4(
+                input_resolution=input_size, dim=out_dim, dim_scale=4, norm_layer=norm_layer
+            )
+            self.last_layer = nn.Conv2d(out_dim, n_class, 1)
+
+        # self.layer_former_1 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        # self.layer_lka_1 = deformableLKABlock(dim=out_dim) # TODO
+
+        # self.layer_lka_1 = nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+        # self.layer_lka_2 =nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+
+        # self.layer_lka_1 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+        # self.layer_lka_2 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+        self.layer_lka_1 = EfCBAM(gate_channels=out_dim)
+        self.layer_lka_2 = EfCBAM(gate_channels=out_dim)
+
+        # self.layer_former_2 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        # self.layer_lka_2 = deformableLKABlock(dim=out_dim) # TODO
+
+        def init_weights(self):
+            for m in self.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.LayerNorm):
+                    nn.init.ones_(m.weight)
+                    nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.Conv2d):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+
+        init_weights(self)
+
+    def forward(self, x1, x2=None):
+        if x2 is not None:  # skip connection exist
+            x2 = x2.contiguous()
+            # b, c, h, w = x1.shape
+            b2, h2, w2, c2 = x2.shape  # 1 28 28 320, 1 56 56 128
+            x2 = x2.view(b2, -1, c2)  # 1 784 320, 1 3136 128
+            x1_expand = self.x1_linear(x1)  # 1 784 256 --> 1 784 320, 1 3136 160 --> 1 3136 128
+
+            # cat_linear_x = self.concat_linear(self.cross_attn(x1_expand, x2)) # 1 784 320, 1 3136 128
+            # cat_linear_x = x1_expand + x2 # Simply add them in the first step. TODO: Add more complex skip connection here
+
+            x2_new = x2.view(x2.size(0), x2.size(2), x2.size(1) // w2, x2.size(1) // h2)
+
+            x1_expand = x1_expand.view(x2.size(0), x2.size(2), x2.size(1) // w2, x2.size(1) // h2)
+
+            attn_gate = self.ag_attn(x1_expand, x2_new)
+
+            cat_linear_x = x1_expand + attn_gate # TODO: nn.parameter (alpha, Beta)
+
+            # tran_layer_1 = self.layer_former_1(cat_linear_x, h, w) # 1 784 320, 1 3136 128
+            # tran_layer_1 = self.layer_lka_1(cat_linear_x, h, w)
+            tran_layer_1 = self.layer_lka_1(cat_linear_x)
+            # print(tran_layer_1.shape)
+            tran_layer_2 = self.layer_lka_2(tran_layer_1)
+            # print(tran_layer_2.shape)
+            # tran_layer_2 = self.layer_former_2(tran_layer_1, h, w) # 1 784 320, 1 3136 128
+            # tran_layer_2 = self.layer_lka_2(tran_layer_1, h, w) #self.layer_lka_1(tran_layer_1, h, w) # Here has to be a 2! LEON CHANGE THIS!!!!
+            tran_layer_2 = tran_layer_2.view(tran_layer_2.size(0), tran_layer_2.size(3) * tran_layer_2.size(2),
+                                             tran_layer_2.size(1))
+            if self.last_layer:
+                out = self.last_layer(
+                    self.layer_up(tran_layer_2).view(b2, 4 * h2, 4 * w2, -1).permute(0, 3, 1, 2))  # 1 9 224 224
+            else:
+                out = self.layer_up(tran_layer_2)  # 1 3136 160
+        else:
+            out = self.layer_up(x1)
+        return out
+
+class MyDecoderLayer6(nn.Module):
+    def __init__(
+        self, input_size, in_out_chan, head_count, token_mlp_mode, reduction_ratio, n_class=9, norm_layer=nn.LayerNorm, is_last=False
+    ):
+        super().__init__()
+        dims = in_out_chan[0]
+        out_dim = in_out_chan[1]
+        key_dim = in_out_chan[2]
+        value_dim = in_out_chan[3]
+        x1_dim = in_out_chan[4]
+        reduction_ratio = reduction_ratio
+        #print("Dim: {} | Out_dim: {} | Key_dim: {} | Value_dim: {} | X1_dim: {}".format(dims, out_dim, key_dim, value_dim, x1_dim))
+        if not is_last:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            #self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            #self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            #)
+            #self.concat_linear = nn.Linear(2 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = PatchExpand(input_resolution=input_size, dim=out_dim, dim_scale=2, norm_layer=norm_layer)
+            self.last_layer = None
+        else:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            #self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            #self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims * 2, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            #)
+            #self.concat_linear = nn.Linear(4 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = FinalPatchExpand_X4(
+                input_resolution=input_size, dim=out_dim, dim_scale=4, norm_layer=norm_layer
+            )
+            self.last_layer = nn.Conv2d(out_dim, n_class, 1)
+
+        #self.layer_former_1 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        #self.layer_lka_1 = deformableLKABlock(dim=out_dim) # TODO
+
+
+        #self.layer_lka_1 = nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+        #self.layer_lka_2 =nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+
+        #self.layer_lka_1 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+        #self.layer_lka_2 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+        self.layer_lka_1 = ECALayer(channels=out_dim)
+        self.layer_lka_2 = ECALayer(channels=out_dim)
+        #self.layer_former_2 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        #self.layer_lka_2 = deformableLKABlock(dim=out_dim) # TODO
+
+        def init_weights(self):
+            for m in self.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.LayerNorm):
+                    nn.init.ones_(m.weight)
+                    nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.Conv2d):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+
+        init_weights(self)
+
+    def forward(self, x1, x2=None):
+        if x2 is not None:  # skip connection exist
+
+            #b, c, h, w = x1.shape
+            b2, h2, w2, c2 = x2.shape # 1 28 28 320, 1 56 56 128
+            x2 = x2.view(b2, -1, c2) # 1 784 320, 1 3136 128
+            x1_expand = self.x1_linear(x1) # 1 784 256 --> 1 784 320, 1 3136 160 --> 1 3136 128
+
+            #cat_linear_x = self.concat_linear(self.cross_attn(x1_expand, x2)) # 1 784 320, 1 3136 128
+            cat_linear_x = x1_expand + x2 # Simply add them in the first step. TODO: Add more complex skip connection here
+            cat_linear_x = cat_linear_x.view(cat_linear_x.size(0), cat_linear_x.size(2), cat_linear_x.size(1) // w2,
+                                             cat_linear_x.size(1) // h2)
+            #tran_layer_1 = self.layer_former_1(cat_linear_x, h, w) # 1 784 320, 1 3136 128
+            #tran_layer_1 = self.layer_lka_1(cat_linear_x, h, w)
+            tran_layer_1 = self.layer_lka_1(cat_linear_x)
+            #print(tran_layer_1.shape)
+            tran_layer_2 = self.layer_lka_2(tran_layer_1)
+            #print(tran_layer_2.shape)
+            #tran_layer_2 = self.layer_former_2(tran_layer_1, h, w) # 1 784 320, 1 3136 128
+            #tran_layer_2 = self.layer_lka_2(tran_layer_1, h, w) #self.layer_lka_1(tran_layer_1, h, w) # Here has to be a 2! LEON CHANGE THIS!!!!
+            tran_layer_2 = tran_layer_2.view(tran_layer_2.size(0), tran_layer_2.size(3) * tran_layer_2.size(2),
+                                             tran_layer_2.size(1))
+            if self.last_layer:
+                out = self.last_layer(self.layer_up(tran_layer_2).view(b2, 4 * h2, 4 * w2, -1).permute(0, 3, 1, 2)) # 1 9 224 224
+            else:
+                out = self.layer_up(tran_layer_2) # 1 3136 160
+        else:
+            out = self.layer_up(x1)
+        return out
+
+class MyDecoderLayer7(nn.Module):
+    def __init__(
+            self, input_size, in_out_chan, head_count, token_mlp_mode, reduction_ratio, n_class=9,
+            norm_layer=nn.LayerNorm, is_last=False
+    ):
+        super().__init__()
+        dims = in_out_chan[0]
+        out_dim = in_out_chan[1]
+        key_dim = in_out_chan[2]
+        value_dim = in_out_chan[3]
+        x1_dim = in_out_chan[4]
+        reduction_ratio = reduction_ratio
+        # print("Dim: {} | Out_dim: {} | Key_dim: {} | Value_dim: {} | X1_dim: {}".format(dims, out_dim, key_dim, value_dim, x1_dim))
+        if not is_last:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            self.ag_attn = Gated_Attention_block(x1_dim, x1_dim, x1_dim)
+            # self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            # self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            # )
+            # self.concat_linear = nn.Linear(2 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = PatchExpand(input_resolution=input_size, dim=out_dim, dim_scale=2, norm_layer=norm_layer)
+            self.last_layer = None
+        else:
+            self.x1_linear = nn.Linear(x1_dim, out_dim)
+            self.ag_attn = Gated_Attention_block(x1_dim, x1_dim, x1_dim)
+            # self.lka_attn = LKABlock(dim=dims) # TODO: Further input parameters here
+            # self.cross_attn = CrossAttentionBlock( # Skip connection block
+            #    dims * 2, key_dim, value_dim, input_size[0], input_size[1], head_count, token_mlp_mode
+            # )
+            # self.concat_linear = nn.Linear(4 * dims, out_dim)
+            # transformer decoder
+            self.layer_up = FinalPatchExpand_X4(
+                input_resolution=input_size, dim=out_dim, dim_scale=4, norm_layer=norm_layer
+            )
+            self.last_layer = nn.Conv2d(out_dim, n_class, 1)
+
+        # self.layer_former_1 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        # self.layer_lka_1 = deformableLKABlock(dim=out_dim) # TODO
+
+        # self.layer_lka_1 = nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+        # self.layer_lka_2 =nn.Conv2d(in_channels=out_dim, out_channels=out_dim, kernel_size=3, stride=1,padding=1)
+
+        # self.layer_lka_1 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+        # self.layer_lka_2 = CBAM(gate_channels=out_dim, reduction_ratio=reduction_ratio)
+        #self.layer_lka_1 = EfCBAM(gate_channels=out_dim)
+        #self.layer_lka_2 = EfCBAM(gate_channels=out_dim)
+
+        self.layer_lka_1 = ECALayer(channels=out_dim)
+        self.layer_lka_2 = ECALayer(channels=out_dim)
+        # self.layer_former_2 = DualTransformerBlock(out_dim, key_dim, value_dim, head_count, token_mlp_mode)
+        # self.layer_lka_2 = deformableLKABlock(dim=out_dim) # TODO
+
+        def init_weights(self):
+            for m in self.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.LayerNorm):
+                    nn.init.ones_(m.weight)
+                    nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.Conv2d):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+
+        init_weights(self)
+
+    def forward(self, x1, x2=None):
+        if x2 is not None:  # skip connection exist
+            x2 = x2.contiguous()
+            # b, c, h, w = x1.shape
+            b2, h2, w2, c2 = x2.shape  # 1 28 28 320, 1 56 56 128
+            x2 = x2.view(b2, -1, c2)  # 1 784 320, 1 3136 128
+            x1_expand = self.x1_linear(x1)  # 1 784 256 --> 1 784 320, 1 3136 160 --> 1 3136 128
+
+            # cat_linear_x = self.concat_linear(self.cross_attn(x1_expand, x2)) # 1 784 320, 1 3136 128
+            # cat_linear_x = x1_expand + x2 # Simply add them in the first step. TODO: Add more complex skip connection here
+
+            x2_new = x2.view(x2.size(0), x2.size(2), x2.size(1) // w2, x2.size(1) // h2)
+
+            x1_expand = x1_expand.view(x2.size(0), x2.size(2), x2.size(1) // w2, x2.size(1) // h2)
+
+            attn_gate = self.ag_attn(x1_expand, x2_new)
+
+            cat_linear_x = x1_expand + attn_gate
+
+            # tran_layer_1 = self.layer_former_1(cat_linear_x, h, w) # 1 784 320, 1 3136 128
+            # tran_layer_1 = self.layer_lka_1(cat_linear_x, h, w)
+            tran_layer_1 = self.layer_lka_1(cat_linear_x)
+            # print(tran_layer_1.shape)
+            tran_layer_2 = self.layer_lka_2(tran_layer_1)
+            # print(tran_layer_2.shape)
+            # tran_layer_2 = self.layer_former_2(tran_layer_1, h, w) # 1 784 320, 1 3136 128
+            # tran_layer_2 = self.layer_lka_2(tran_layer_1, h, w) #self.layer_lka_1(tran_layer_1, h, w) # Here has to be a 2! LEON CHANGE THIS!!!!
+            tran_layer_2 = tran_layer_2.view(tran_layer_2.size(0), tran_layer_2.size(3) * tran_layer_2.size(2),
+                                             tran_layer_2.size(1))
+            if self.last_layer:
+                out = self.last_layer(
+                    self.layer_up(tran_layer_2).view(b2, 4 * h2, 4 * w2, -1).permute(0, 3, 1, 2))  # 1 9 224 224
+            else:
+                out = self.layer_up(tran_layer_2)  # 1 3136 160
+        else:
+            out = self.layer_up(x1)
+        return out
 ##########################################
 #
 # MaxViT stuff
@@ -637,8 +1441,8 @@ class MyDecoderLayer(nn.Module):
 ##########################################
 #from .merit_lib.networks import MaxViT4Out_Small#, MaxViT4Out_Small3D
 #from networks.merit_lib.networks import MaxViT4Out_Small
-from merit_lib.networks import MaxViT4Out_Small
-from merit_lib.decoders import CASCADE_Add, CASCADE_Cat
+from .merit_lib.networks import MaxViT4Out_Small
+from .merit_lib.decoders import CASCADE_Add, CASCADE_Cat
 
 
 
@@ -706,7 +1510,400 @@ class MaxViT_deformableLKAFormer(nn.Module):
 
         return tmp_0
 
+##########################################
+#
+# MaxViT with CBAM as Decoder stuff
+# By: Sina
+##########################################
+class MaxViT_deformableLKAFormer2(nn.Module):
+    def __init__(self, num_classes=9, head_count=1, token_mlp_mode="mix_skip"):
+        super().__init__()
 
+        # Encoder
+        self.backbone = MaxViT4Out_Small(n_class=num_classes, img_size=224)
+
+        # Decoder
+        d_base_feat_size = 7  # 16 for 512 input size, and 7 for 224
+        in_out_chan = [
+            [96, 96, 96, 96, 96],
+            [192, 192, 192, 192, 192],
+            [384, 384, 384, 384, 384],
+            [768, 768, 768, 768, 768],
+        ]  # [dim, out_dim, key_dim, value_dim, x2_dim]
+        reduction_ratio = [16,8,6,2]
+        
+        self.decoder_3 = MyDecoderLayer2(
+            (d_base_feat_size, d_base_feat_size),
+            in_out_chan[3],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio = reduction_ratio[0])
+
+        self.decoder_2 = MyDecoderLayer2(
+            (d_base_feat_size * 2, d_base_feat_size * 2),
+            in_out_chan[2],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio = reduction_ratio[1])
+        self.decoder_1 = MyDecoderLayer2(
+            (d_base_feat_size * 4, d_base_feat_size * 4),
+            in_out_chan[1],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio = reduction_ratio[2])
+        self.decoder_0 = MyDecoderLayer2(
+            (d_base_feat_size * 8, d_base_feat_size * 8),
+            in_out_chan[0],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            is_last=True,
+            reduction_ratio = reduction_ratio[3])
+
+    def forward(self, x):
+        # ---------------Encoder-------------------------
+        if x.size()[1] == 1:
+            x = x.repeat(1, 3, 1, 1)
+
+        output_enc_3, output_enc_2, output_enc_1, output_enc_0 = self.backbone(x)
+
+        b, c, _, _ = output_enc_3.shape
+        #print(output_enc_3.shape)
+        # ---------------Decoder-------------------------
+        tmp_3 = self.decoder_3(output_enc_3.permute(0, 2, 3, 1).view(b, -1, c))
+        tmp_2 = self.decoder_2(tmp_3, output_enc_2.permute(0, 2, 3, 1))
+        tmp_1 = self.decoder_1(tmp_2, output_enc_1.permute(0, 2, 3, 1))
+        tmp_0 = self.decoder_0(tmp_1, output_enc_0.permute(0, 2, 3, 1))
+
+        return tmp_0
+
+class MaxViT_deformableLKAFormer3(nn.Module):
+    def __init__(self, num_classes=9, head_count=1, token_mlp_mode="mix_skip"):
+        super().__init__()
+
+        # Encoder
+        self.backbone = MaxViT4Out_Small(n_class=num_classes, img_size=224)
+
+        # Decoder
+        d_base_feat_size = 7  # 16 for 512 input size, and 7 for 224
+        in_out_chan = [
+            [96, 96, 96, 96, 96],
+            [192, 192, 192, 192, 192],
+            [384, 384, 384, 384, 384],
+            [768, 768, 768, 768, 768],
+        ]  # [dim, out_dim, key_dim, value_dim, x2_dim]
+        reduction_ratio = [16, 8, 6, 2]
+
+        self.decoder_3 = MyDecoderLayer3(
+            (d_base_feat_size, d_base_feat_size),
+            in_out_chan[3],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[0])
+
+        self.decoder_2 = MyDecoderLayer3(
+            (d_base_feat_size * 2, d_base_feat_size * 2),
+            in_out_chan[2],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[1])
+        self.decoder_1 = MyDecoderLayer3(
+            (d_base_feat_size * 4, d_base_feat_size * 4),
+            in_out_chan[1],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[2])
+        self.decoder_0 = MyDecoderLayer3(
+            (d_base_feat_size * 8, d_base_feat_size * 8),
+            in_out_chan[0],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            is_last=True,
+            reduction_ratio=reduction_ratio[3])
+
+    def forward(self, x):
+        # ---------------Encoder-------------------------
+        if x.size()[1] == 1:
+            x = x.repeat(1, 3, 1, 1)
+
+        output_enc_3, output_enc_2, output_enc_1, output_enc_0 = self.backbone(x)
+
+        b, c, _, _ = output_enc_3.shape
+        # print(output_enc_3.shape)
+        # ---------------Decoder-------------------------
+        tmp_3 = self.decoder_3(output_enc_3.permute(0, 2, 3, 1).view(b, -1, c))
+        tmp_2 = self.decoder_2(tmp_3, output_enc_2.permute(0, 2, 3, 1))
+        tmp_1 = self.decoder_1(tmp_2, output_enc_1.permute(0, 2, 3, 1))
+        tmp_0 = self.decoder_0(tmp_1, output_enc_0.permute(0, 2, 3, 1))
+
+        return tmp_0
+
+class MaxViT_deformableLKAFormer4(nn.Module):
+    def __init__(self, num_classes=9, head_count=1, token_mlp_mode="mix_skip"):
+        super().__init__()
+
+        # Encoder
+        self.backbone = MaxViT4Out_Small(n_class=num_classes, img_size=224)
+
+        # Decoder
+        d_base_feat_size = 7  # 16 for 512 input size, and 7 for 224
+        in_out_chan = [
+            [96, 96, 96, 96, 96],
+            [192, 192, 192, 192, 192],
+            [384, 384, 384, 384, 384],
+            [768, 768, 768, 768, 768],
+        ]  # [dim, out_dim, key_dim, value_dim, x2_dim]
+        reduction_ratio = [16, 8, 6, 2]
+
+        self.decoder_3 = MyDecoderLayer4(
+            (d_base_feat_size, d_base_feat_size),
+            in_out_chan[3],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[0])
+
+        self.decoder_2 = MyDecoderLayer4(
+            (d_base_feat_size * 2, d_base_feat_size * 2),
+            in_out_chan[2],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[1])
+        self.decoder_1 = MyDecoderLayer4(
+            (d_base_feat_size * 4, d_base_feat_size * 4),
+            in_out_chan[1],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[2])
+        self.decoder_0 = MyDecoderLayer4(
+            (d_base_feat_size * 8, d_base_feat_size * 8),
+            in_out_chan[0],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            is_last=True,
+            reduction_ratio=reduction_ratio[3])
+
+    def forward(self, x):
+        # ---------------Encoder-------------------------
+        if x.size()[1] == 1:
+            x = x.repeat(1, 3, 1, 1)
+
+        output_enc_3, output_enc_2, output_enc_1, output_enc_0 = self.backbone(x)
+
+        b, c, _, _ = output_enc_3.shape
+        # print(output_enc_3.shape)
+        # ---------------Decoder-------------------------
+        tmp_3 = self.decoder_3(output_enc_3.permute(0, 2, 3, 1).view(b, -1, c))
+        tmp_2 = self.decoder_2(tmp_3, output_enc_2.permute(0, 2, 3, 1))
+        tmp_1 = self.decoder_1(tmp_2, output_enc_1.permute(0, 2, 3, 1))
+        tmp_0 = self.decoder_0(tmp_1, output_enc_0.permute(0, 2, 3, 1))
+
+        return tmp_0
+
+class MaxViT_deformableLKAFormer5(nn.Module):
+    def __init__(self, num_classes=9, head_count=1, token_mlp_mode="mix_skip"):
+        super().__init__()
+
+        # Encoder
+        self.backbone = MaxViT4Out_Small(n_class=num_classes, img_size=224)
+
+        # Decoder
+        d_base_feat_size = 7  # 16 for 512 input size, and 7 for 224
+        in_out_chan = [
+            [96, 96, 96, 96, 96],
+            [192, 192, 192, 192, 192],
+            [384, 384, 384, 384, 384],
+            [768, 768, 768, 768, 768],
+        ]  # [dim, out_dim, key_dim, value_dim, x2_dim]
+        reduction_ratio = [16, 8, 6, 2]
+
+        self.decoder_3 = MyDecoderLayer5(
+            (d_base_feat_size, d_base_feat_size),
+            in_out_chan[3],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[0])
+
+        self.decoder_2 = MyDecoderLayer5(
+            (d_base_feat_size * 2, d_base_feat_size * 2),
+            in_out_chan[2],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[1])
+        self.decoder_1 = MyDecoderLayer5(
+            (d_base_feat_size * 4, d_base_feat_size * 4),
+            in_out_chan[1],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[2])
+        self.decoder_0 = MyDecoderLayer5(
+            (d_base_feat_size * 8, d_base_feat_size * 8),
+            in_out_chan[0],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            is_last=True,
+            reduction_ratio=reduction_ratio[3])
+
+    def forward(self, x):
+        # ---------------Encoder-------------------------
+        if x.size()[1] == 1:
+            x = x.repeat(1, 3, 1, 1)
+
+        output_enc_3, output_enc_2, output_enc_1, output_enc_0 = self.backbone(x)
+
+        b, c, _, _ = output_enc_3.shape
+        # print(output_enc_3.shape)
+        # ---------------Decoder-------------------------
+        tmp_3 = self.decoder_3(output_enc_3.permute(0, 2, 3, 1).view(b, -1, c))
+        tmp_2 = self.decoder_2(tmp_3, output_enc_2.permute(0, 2, 3, 1))
+        tmp_1 = self.decoder_1(tmp_2, output_enc_1.permute(0, 2, 3, 1))
+        tmp_0 = self.decoder_0(tmp_1, output_enc_0.permute(0, 2, 3, 1))
+
+        return tmp_0
+
+class MaxViT_deformableLKAFormer6(nn.Module):
+    def __init__(self, num_classes=9, head_count=1, token_mlp_mode="mix_skip"):
+        super().__init__()
+
+        # Encoder
+        self.backbone = MaxViT4Out_Small(n_class=num_classes, img_size=224)
+
+        # Decoder
+        d_base_feat_size = 7  # 16 for 512 input size, and 7 for 224
+        in_out_chan = [
+            [96, 96, 96, 96, 96],
+            [192, 192, 192, 192, 192],
+            [384, 384, 384, 384, 384],
+            [768, 768, 768, 768, 768],
+        ]  # [dim, out_dim, key_dim, value_dim, x2_dim]
+        reduction_ratio = [16, 8, 6, 2]
+
+        self.decoder_3 = MyDecoderLayer6(
+            (d_base_feat_size, d_base_feat_size),
+            in_out_chan[3],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[0])
+
+        self.decoder_2 = MyDecoderLayer6(
+            (d_base_feat_size * 2, d_base_feat_size * 2),
+            in_out_chan[2],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[1])
+        self.decoder_1 = MyDecoderLayer6(
+            (d_base_feat_size * 4, d_base_feat_size * 4),
+            in_out_chan[1],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[2])
+        self.decoder_0 = MyDecoderLayer6(
+            (d_base_feat_size * 8, d_base_feat_size * 8),
+            in_out_chan[0],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            is_last=True,
+            reduction_ratio=reduction_ratio[3])
+
+    def forward(self, x):
+        # ---------------Encoder-------------------------
+        if x.size()[1] == 1:
+            x = x.repeat(1, 3, 1, 1)
+
+        output_enc_3, output_enc_2, output_enc_1, output_enc_0 = self.backbone(x)
+
+        b, c, _, _ = output_enc_3.shape
+        # print(output_enc_3.shape)
+        # ---------------Decoder-------------------------
+        tmp_3 = self.decoder_3(output_enc_3.permute(0, 2, 3, 1).view(b, -1, c))
+        tmp_2 = self.decoder_2(tmp_3, output_enc_2.permute(0, 2, 3, 1))
+        tmp_1 = self.decoder_1(tmp_2, output_enc_1.permute(0, 2, 3, 1))
+        tmp_0 = self.decoder_0(tmp_1, output_enc_0.permute(0, 2, 3, 1))
+
+        return tmp_0
+
+class MaxViT_deformableLKAFormer7(nn.Module):
+    def __init__(self, num_classes=9, head_count=1, token_mlp_mode="mix_skip"):
+        super().__init__()
+
+        # Encoder
+        self.backbone = MaxViT4Out_Small(n_class=num_classes, img_size=224)
+
+        # Decoder
+        d_base_feat_size = 7  # 16 for 512 input size, and 7 for 224
+        in_out_chan = [
+            [96, 96, 96, 96, 96],
+            [192, 192, 192, 192, 192],
+            [384, 384, 384, 384, 384],
+            [768, 768, 768, 768, 768],
+        ]  # [dim, out_dim, key_dim, value_dim, x2_dim]
+        reduction_ratio = [16, 8, 6, 2]
+
+        self.decoder_3 = MyDecoderLayer7(
+            (d_base_feat_size, d_base_feat_size),
+            in_out_chan[3],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[0])
+
+        self.decoder_2 = MyDecoderLayer7(
+            (d_base_feat_size * 2, d_base_feat_size * 2),
+            in_out_chan[2],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[1])
+        self.decoder_1 = MyDecoderLayer7(
+            (d_base_feat_size * 4, d_base_feat_size * 4),
+            in_out_chan[1],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            reduction_ratio=reduction_ratio[2])
+        self.decoder_0 = MyDecoderLayer7(
+            (d_base_feat_size * 8, d_base_feat_size * 8),
+            in_out_chan[0],
+            head_count,
+            token_mlp_mode,
+            n_class=num_classes,
+            is_last=True,
+            reduction_ratio=reduction_ratio[3])
+
+    def forward(self, x):
+        # ---------------Encoder-------------------------
+        if x.size()[1] == 1:
+            x = x.repeat(1, 3, 1, 1)
+
+        output_enc_3, output_enc_2, output_enc_1, output_enc_0 = self.backbone(x)
+
+        b, c, _, _ = output_enc_3.shape
+        # print(output_enc_3.shape)
+        # ---------------Decoder-------------------------
+        tmp_3 = self.decoder_3(output_enc_3.permute(0, 2, 3, 1).view(b, -1, c))
+        tmp_2 = self.decoder_2(tmp_3, output_enc_2.permute(0, 2, 3, 1))
+        tmp_1 = self.decoder_1(tmp_2, output_enc_1.permute(0, 2, 3, 1))
+        tmp_0 = self.decoder_0(tmp_1, output_enc_0.permute(0, 2, 3, 1))
+
+        return tmp_0
 if __name__ == "__main__":
     
 

@@ -11,16 +11,16 @@ import logging
 
 from scipy import ndimage
 
-from merit_lib.decoders import CASCADE_Add, CASCADE_Cat
-#from decoders import CASCADE_Add, CASCADE_Cat
-#from networks.merit_lib.maxxvit_4out import maxvit_tiny_rw_224 as maxvit_tiny_rw_224_4out
-#from networks.merit_lib.maxxvit_4out import maxvit_rmlp_tiny_rw_256 as maxvit_rmlp_tiny_rw_256_4out
-#from networks.merit_lib.maxxvit_4out import maxxvit_rmlp_small_rw_256 as maxxvit_rmlp_small_rw_256_4out
-#from networks.merit_lib.maxxvit_4out import maxvit_rmlp_small_rw_224 as maxvit_rmlp_small_rw_224_4out
-from merit_lib.maxxvit_4out import maxvit_tiny_rw_224 as maxvit_tiny_rw_224_4out
-from merit_lib.maxxvit_4out import maxvit_rmlp_tiny_rw_256 as maxvit_rmlp_tiny_rw_256_4out
-from merit_lib.maxxvit_4out import maxxvit_rmlp_small_rw_256 as maxxvit_rmlp_small_rw_256_4out
-from merit_lib.maxxvit_4out import maxvit_rmlp_small_rw_224 as maxvit_rmlp_small_rw_224_4out
+#from .decoders import CASCADE_Add, CASCADE_Cat
+from .decoders import CASCADE_Add, CASCADE_Cat
+from networks.merit_lib.maxxvit_4out import maxvit_tiny_rw_224 as maxvit_tiny_rw_224_4out
+from networks.merit_lib.maxxvit_4out import maxvit_rmlp_tiny_rw_256 as maxvit_rmlp_tiny_rw_256_4out
+from networks.merit_lib.maxxvit_4out import maxxvit_rmlp_small_rw_256 as maxxvit_rmlp_small_rw_256_4out
+from networks.merit_lib.maxxvit_4out import maxvit_rmlp_small_rw_224 as maxvit_rmlp_small_rw_224_4out
+#from .merit_lib.maxxvit_4out import maxvit_tiny_rw_224 as maxvit_tiny_rw_224_4out
+#from .merit_lib.maxxvit_4out import maxvit_rmlp_tiny_rw_256 as maxvit_rmlp_tiny_rw_256_4out
+#from .merit_lib.maxxvit_4out import maxxvit_rmlp_small_rw_256 as maxxvit_rmlp_small_rw_256_4out
+#from .merit_lib.maxxvit_4out import maxvit_rmlp_small_rw_224 as maxvit_rmlp_small_rw_224_4out
 
 
 logger = logging.getLogger(__name__)
@@ -239,8 +239,8 @@ class MaxViT4Out_Small(nn.Module):
         if img_size==224:
             self.backbone = maxvit_rmlp_small_rw_224_4out()  # [64, 128, 320, 512]
             if pretrain:
-                print('Loading:', 'C:/Users/LENOVO/Downloads/maxvit_rmlp_small_rw_224_sw-6ef0ae4f.pth')
-                state_dict = torch.load('C:/Users/LENOVO/Downloads/maxvit_rmlp_small_rw_224_sw-6ef0ae4f.pth')
+                print('Loading:', '/dss/dsshome1/01/di93lum/deeplearning/sina/deformableLKA2/2D/maxvit_rmlp_small_rw_224_sw-6ef0ae4f.pth')
+                state_dict = torch.load('/dss/dsshome1/01/di93lum/deeplearning/sina/deformableLKA2/2D/maxvit_rmlp_small_rw_224_sw-6ef0ae4f.pth')
         elif(img_size==256):
             self.backbone = maxxvit_rmlp_small_rw_256_4out()
             print('Loading:', './pretrained_pth/maxvit/maxxvit_rmlp_small_rw_256_sw-37e217ff.pth')

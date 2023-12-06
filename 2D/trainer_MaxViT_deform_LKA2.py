@@ -112,8 +112,8 @@ def trainer_synapse(args, model, snapshot_path):
 
     jc_loss = JaccardLoss()
     ce_loss = CrossEntropyLoss()
-    dice_loss = DiceLoss(num_classes)
-    boundary_loss = BoundaryDoULoss(num_classes)
+    #dice_loss = DiceLoss(num_classes)
+    #boundary_loss = BoundaryDoULoss(num_classes)
     optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
     #optimizer = optim.AdamW(model.parameters(),lr=base_lr, weight_decay=0.0001)
     writer = SummaryWriter(snapshot_path + '/log')
@@ -131,7 +131,7 @@ def trainer_synapse(args, model, snapshot_path):
     acc_loss_dc = 0.0
     acc_loss_bo = 0.0
     acc_loss_jc = 0.0
-
+    acc_loss3 = 0.0
     for epoch_num in iterator:
         for i_batch, sampled_batch in enumerate(trainloader):
             image_batch, label_batch = sampled_batch['image'], sampled_batch['label']
@@ -139,19 +139,19 @@ def trainer_synapse(args, model, snapshot_path):
             image_batch, label_batch = image_batch.cuda(), label_batch.squeeze(1).cuda()
             outputs = model(image_batch)
             # outputs = F.interpolate(outputs, size=label_batch.shape[1:], mode='bilinear', align_corners=False)
-            #loss_ce = ce_loss(outputs, label_batch[:].long())
+            loss_ce = ce_loss(outputs, label_batch[:].long())
             #loss_dice = dice_loss(outputs, label_batch, softmax=True)
-            #loss_jacard = jc_loss(outputs, label_batch)
-            loss_boundary = boundary_loss(outputs, label_batch[:])
+            loss_jacard = jc_loss(outputs, label_batch)
+            #loss_boundary = boundary_loss(outputs, label_batch[:])
 
             #loss = 0.4 * loss_ce + 0.6 * loss_dice
-            loss2 = loss_boundary
-            #loss3 = 0.5 * loss_ce + 0.5 * loss_jacard
+            #loss2 = loss_boundary
+            loss3 = 0.5 * loss_ce + 0.5 * loss_jacard
             # print("loss-----------", loss)
             optimizer.zero_grad()
             #loss.backward()
-            loss2.backward()
-            #loss3.backward()
+            #loss2.backward()
+            loss3.backward()
             optimizer.step()
 
             lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
@@ -160,30 +160,32 @@ def trainer_synapse(args, model, snapshot_path):
 
             iter_num = iter_num + 1
             writer.add_scalar('info/lr', lr_, iter_num)
-            writer.add_scalar('info/boundary_loss', loss2, iter_num)
-            #writer.add_scalar('info/jaccard_loss', loss3, iter_num)
+            #writer.add_scalar('info/boundary_loss', loss2, iter_num)
+            writer.add_scalar('info/jaccard_ce', loss3, iter_num)
             #writer.add_scalar('info/total_loss', loss, iter_num)
-            #writer.add_scalar('info/loss_ce', loss_ce, iter_num)
+            writer.add_scalar('info/loss_ce', loss_ce, iter_num)
+            writer.add_scalar('info/loss_ce', loss_jacard, iter_num)
             #writer.add_scalar('info/loss_dice', loss_dice, iter_num)
 
             #acc_loss += loss.item()
             #acc_loss_dc += loss_dice.item()
-            #acc_loss_ce += loss_ce.item()
-            acc_loss_bo += loss2.item()
-            #acc_loss_jc += loss3.item()
+            acc_loss_ce += loss_ce.item()
+            #acc_loss_bo += loss2.item()
+            acc_loss_jc += loss_jacard.item()
+            acc_loss3 += loss3.item()
 
             if iter_num % 100 == 0:
-                #acc_loss = acc_loss / 100
-                #acc_loss_ce = acc_loss_ce / 100
+                acc_loss3 = acc_loss3 / 100
+                acc_loss_ce = acc_loss_ce / 100
                 #acc_loss_dc = acc_loss_dc / 100
-                acc_loss_bo = acc_loss_bo / 100
-                #acc_loss_jc = acc_loss_jc / 100
-                logging.info('iteration %d : loss : %f, loss_ce: %f, loss_dice: %f loss_boundary: %f' % (iter_num,acc_loss_bo))
-                #acc_loss = 0.0
-                #acc_loss_ce = 0.0
-                #acc_loss_dc = 0.0
+                #acc_loss_bo = acc_loss_bo / 100
+                acc_loss_jc = acc_loss_jc / 100
+                logging.info('iteration %d : loss : %f, loss_ce: %f, loss_dice: %f loss_boundary: %f' % (iter_num, acc_loss3, acc_loss_ce,acc_loss_jc))
+                acc_loss = 0.0
+                acc_loss_ce = 0.0
+                acc_loss_dc = 0.0
                 acc_loss_bo = 0.0
-                #acc_loss_jc = 0.0
+                acc_loss_jc = 0.0
 
             if iter_num % 100 == 0:
                 image = image_batch[1, 0:1, :, :]

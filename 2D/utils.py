@@ -5,8 +5,22 @@ from scipy.ndimage import zoom
 import torch.nn as nn
 import SimpleITK as sitk
 from torch.nn import functional as F
+from torch.nn.functional import softmax
 from torchvision import transforms
 
+
+def flatten(input, target, ignore_index):
+    num_class = input.size(1)
+    input = input.permute(0, 2, 3, 1).contiguous()
+
+    input_flatten = input.view(-1, num_class)
+    target_flatten = target.view(-1)
+
+    mask = (target_flatten != ignore_index)
+    input_flatten = input_flatten[mask]
+    target_flatten = target_flatten[mask]
+
+    return input_flatten, target_flatten
 
 class DiceLoss(nn.Module):
     def __init__(self, n_classes):
@@ -59,7 +73,70 @@ def calculate_metric_percase(pred, gt):
     else:
         return 0, 0
 
+class BoundaryDoULoss(nn.Module):
+    def __init__(self, n_classes):
+        super(BoundaryDoULoss, self).__init__()
+        self.n_classes = n_classes
 
+    def _one_hot_encoder(self, input_tensor):
+        tensor_list = []
+        for i in range(self.n_classes):
+            temp_prob = input_tensor == i
+            tensor_list.append(temp_prob.unsqueeze(1))
+        output_tensor = torch.cat(tensor_list, dim=1)
+        return output_tensor.float()
+
+    def _adaptive_size(self, score, target):
+        kernel = torch.Tensor([[0,1,0], [1,1,1], [0,1,0]])
+        padding_out = torch.zeros((target.shape[0], target.shape[-2]+2, target.shape[-1]+2))
+        padding_out[:, 1:-1, 1:-1] = target
+        h, w = 3, 3
+
+        Y = torch.zeros((padding_out.shape[0], padding_out.shape[1] - h + 1, padding_out.shape[2] - w + 1)).cuda()
+        for i in range(Y.shape[0]):
+            Y[i, :, :] = torch.conv2d(target[i].unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0).cuda(), padding=1)
+        Y = Y * target
+        Y[Y == 5] = 0
+        C = torch.count_nonzero(Y)
+        S = torch.count_nonzero(target)
+        smooth = 1e-5
+        alpha = 1 - (C + smooth) / (S + smooth)
+        alpha = 2 * alpha - 1
+
+        intersect = torch.sum(score * target)
+        y_sum = torch.sum(target * target)
+        z_sum = torch.sum(score * score)
+        alpha = min(alpha, 0.8)  ## We recommend using a truncated alpha of 0.8, as using truncation gives better results on some datasets and has rarely effect on others.
+        loss = (z_sum + y_sum - 2 * intersect + smooth) / (z_sum + y_sum - (1 + alpha) * intersect + smooth)
+
+        return loss
+
+
+class JaccardLoss(nn.Module):
+    def __init__(self, ignore_index=255, smooth=1.0):
+        super(JaccardLoss, self).__init__()
+        self.ignore_index = ignore_index
+        self.smooth = smooth
+
+    def forward(self, input, target):
+        input, target = flatten(input, target, self.ignore_index)
+        input = softmax(input, dim=1)
+        num_classes = input.size(1)
+        losses = []
+        for c in range(num_classes):
+            target_c = (target == c).float()
+            input_c = input[:, c]
+
+            intersection = (input_c * target_c).sum()
+            total = (input_c + target_c).sum()
+            union = total - intersection
+            IoU = (intersection + self.smooth) / (union + self.smooth)
+
+            losses.append(1 - IoU)
+
+        losses = torch.stack(losses)
+        loss = losses.mean()
+        return loss
 def test_single_volume(image, label, net, classes, patch_size=[256, 256], test_save_path=None, case=None, z_spacing=1):
     image, label = image.squeeze(0).cpu().detach().numpy(), label.squeeze(0).cpu().detach().numpy()
     if len(image.shape) == 3:

@@ -11,7 +11,9 @@ from torch.utils.data import DataLoader
 import torch.backends.cudnn as cudnn
 import random
 
+import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 from medpy.metric import dc, hd95
 from tensorboardX import SummaryWriter
@@ -20,6 +22,7 @@ from dataset_ACDC import ACDCdataset, RandomGenerator
 from test_acdc import inference
 from networks.MaxViT_deform_LKA import MaxViT_deformableLKAFormerTrEcaGanorm
 # from lib.cnn_vit_backbone import CONFIGS as CONFIGS_ViT_seg
+import datetime
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--batch_size", default=12, help="batch size")
@@ -128,8 +131,9 @@ iter_num = 0
 Loss = []
 Test_Accuracy = []
 
-Best_dcs = 0.5
-
+Best_dcs = 0.3
+dice_ = []
+hd95_ = []
 logging.basicConfig(filename=snapshot_path + "/log.txt", level=logging.INFO,
                     format='[%(asctime)s.%(msecs)03d] %(message)s', datefmt='%H:%M:%S')
 
@@ -162,6 +166,28 @@ def val():
 
     print("val avg_dsc: %f" % (performance))
     return performance
+
+
+def plot_result(dice, h, snapshot_path,args):
+    dict = {'mean_dice': dice, 'mean_hd95': h}
+    df = pd.DataFrame(dict)
+    plt.figure(0)
+    df['mean_dice'].plot()
+    resolution_value = 1200
+    plt.title('Mean Dice')
+    date_and_time = datetime.datetime.now()
+    filename = f'{args.model_name}_' + str(date_and_time)+'dice'+'.png'
+    save_mode_path = os.path.join(snapshot_path, filename)
+    plt.savefig(save_mode_path, format="png", dpi=resolution_value)
+    plt.figure(1)
+    df['mean_hd95'].plot()
+    plt.title('Mean hd95')
+    filename = f'{args.model_name}_' + str(date_and_time)+'hd95'+'.png'
+    save_mode_path = os.path.join(snapshot_path, filename)
+    #save csv
+    filename = f'{args.model_name}_' + str(date_and_time)+'results'+'.csv'
+    save_mode_path = os.path.join(snapshot_path, filename)
+    df.to_csv(save_mode_path, sep='\t')
 
 
 for epoch in iterator:
@@ -226,7 +252,9 @@ for epoch in iterator:
 
         Best_dcs = avg_dcs
 
-        avg_dcs, avg_hd = inference(args, net, testloader, args.test_save_dir) #TODO: Check the Tests Output
+        avg_dcs, avg_hd = inference(args, net, testloader, args.test_save_dir)
+        dice_.append(avg_dcs)
+        hd95_.append(avg_hd)
         print("test avg_dsc: %f" % (avg_dcs))
         Test_Accuracy.append(avg_dcs)
 
@@ -236,3 +264,6 @@ for epoch in iterator:
         logging.info("save model to {}".format(save_model_path))
         iterator.close()
         break
+
+    plot_result(dice_, hd95_, snapshot_path, args)
+    writer.close()

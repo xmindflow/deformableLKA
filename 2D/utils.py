@@ -111,6 +111,17 @@ class BoundaryDoULoss(nn.Module):
 
         return loss
 
+    def forward(self, inputs, target):
+            inputs = torch.softmax(inputs, dim=1)
+            target = self._one_hot_encoder(target)
+
+            assert inputs.size() == target.size(), 'predict {} & target {} shape do not match'.format(inputs.size(),
+                                                                                                      target.size())
+
+            loss = 0.0
+            for i in range(0, self.n_classes):
+                loss += self._adaptive_size(inputs[:, i], target[:, i])
+            return loss / self.n_classes
 
 class JaccardLoss(nn.Module):
     def __init__(self, ignore_index=255, smooth=1.0):

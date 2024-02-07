@@ -1588,7 +1588,7 @@ class MyDecoderLayerTrEcaGanorm(nn.Module):
             cat_linear_x = cat_linear_x.permute(0,2,3,1) # B H W C
             cat_linear_x = self.ag_attn_norm(cat_linear_x) # B H W C
 
-            cat_linear_x.permute(0, 3, 1, 2) # B C H W
+            cat_linear_x = cat_linear_x.permute(0, 3, 1, 2).contiguous() # B C H W
             # tran_layer_1 = self.layer_former_1(cat_linear_x, h, w) # 1 784 320, 1 3136 128
             # tran_layer_1 = self.layer_lka_1(cat_linear_x, h, w)
             tran_layer_1 = self.layer_lka_1(cat_linear_x)

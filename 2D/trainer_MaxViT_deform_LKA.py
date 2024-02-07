@@ -178,7 +178,7 @@ def trainer_synapse(args, model, snapshot_path):
                 #acc_loss_dc = acc_loss_dc / 100
                 acc_loss_bo = acc_loss_bo / 100
                 #acc_loss_jc = acc_loss_jc / 100
-                logging.info('iteration %d : loss : %f, loss_ce: %f, loss_dice: %f loss_boundary: %f' % (iter_num,acc_loss_bo))
+                logging.info('iteration %d : loss_boundary: %f' % (iter_num,acc_loss_bo))
                 #acc_loss = 0.0
                 #acc_loss_ce = 0.0
                 #acc_loss_dc = 0.0

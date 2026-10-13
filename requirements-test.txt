@@ -1,0 +1,10 @@
+# Additional packages needed by the CPU smoke tests and Synapse evaluation.
+# PyTorch, torchvision, timm, numpy, pytest, and OpenCV are reused from the
+# existing /Volumes/t7/program/python/environments/segformer installation.
+einops==0.6.1
+fvcore==0.1.5.post20221221
+h5py==3.8.0
+MedPy==0.4.0
+nibabel==5.1.0
+scipy==1.9.1
+SimpleITK==2.2.1

@@ -6,6 +6,13 @@ We have introduced a novel approach called **Deformable Large Kernel Attention (
 
 > Reza Azad, Leon Niggemeier, Michael Hüttemann, Amirhossein Kazerouni, Ehsan Khodapanah Aghdam, Yury Velichko, Ulas Bagci and Dorit Merhof
 
+## Local D-LKA 2D setup and validation
+
+- Paper PDF: [`Beyond_Self-Attention_D-LKA_WACV2024.pdf`](Beyond_Self-Attention_D-LKA_WACV2024.pdf)
+- CPU environment, official data/checkpoint links, and setup notes: [`docs/DLKA_2D_DATA_AND_ENV.md`](docs/DLKA_2D_DATA_AND_ENV.md)
+- Test cases and results: [`docs/DLKA_2D_TEST_REPORT.md`](docs/DLKA_2D_TEST_REPORT.md)
+- Run smoke tests: `/Volumes/t7/program/python/environments/dlka2d/bin/python -m pytest -q tests`
+
 <br>
 
 <p align="center">

@@ -22,7 +22,8 @@ Command:
 /Volumes/t7/program/python/environments/dlka2d/bin/python -m pytest -q tests/test_dlka_2d.py
 ```
 
-Result: **3 passed, 1 warning in 2.27s**. The warning is an upstream
+Result after moving upstream code under `official/`: **3 passed, 1 warning in
+4.11s**. The warning is an upstream
 `torch.meshgrid` notice about adding the future `indexing` argument.
 
 The test run confirms the local CPU torchvision deformable convolution works,

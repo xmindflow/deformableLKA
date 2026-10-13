@@ -10,7 +10,7 @@
 - PDF SHA-256: `e5a53dd6c9180e067d8e1b85b0ad264349c6f515d23a828e1b5ab6e00f9a2527`
 
 The upstream repository contains both 2D and 3D implementations. The current
-work targets the 2D implementation under `2D/`.
+work targets the 2D implementation under `official/2D/`.
 
 ## Environment on this Mac
 

@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "2D"))
+sys.path.insert(0, str(REPO_ROOT / "official" / "2D"))
 
 from deformable_LKA.deformable_LKA import DeformConv, deformable_LKA_Attention  # noqa: E402
 from networks.MaxViT_deform_LKA import MaxViT_deformableLKAFormer  # noqa: E402
